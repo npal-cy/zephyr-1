@@ -498,6 +498,28 @@ int __weak bt_hci_transport_setup(const struct device *dev)
 	return 0;
 }
 
+
+/** HCI driver callback 
+  *
+  * Vendors can use this callback to implement extansion
+  * for BT HCI driver.  
+  * 
+  * @param event - HCI driver Event (reffer to bt_hci_driver_event) 
+  * 
+  * @param event_param - Event parameter. It is pointer to void,
+  *                      and should be cast to event-specific type.
+  * 
+  * Refer to bt_hci_driver_event enumeration for full list of 
+  * events and detailed description each of them.
+  *  
+  * @return 0 on success, negative error value on failure
+  */
+int __weak h4_callback(enum bt_hci_driver_event event, void* event_param)
+{
+	return 0;
+}
+
+
 static int h4_open(void)
 {
 	int ret;
@@ -530,6 +552,7 @@ static const struct bt_hci_driver drv = {
 	.bus		= BT_HCI_DRIVER_BUS_UART,
 	.open		= h4_open,
 	.send		= h4_send,
+	.callback   = h4_callback
 };
 
 static int bt_uart_init(const struct device *unused)

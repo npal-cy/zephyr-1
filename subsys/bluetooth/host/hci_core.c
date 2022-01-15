@@ -3277,6 +3277,18 @@ static int hci_init(void)
 {
 	int err;
 
+#if defined(CONFIG_BT_HCI_EVENT_SETUP)
+	if (bt_dev.drv->callback) {
+		/* Sends BT_HCI_EVENT_SETUP event to HCI driver callback to
+		 * executes vendor-specific commands sequence to initialize
+		 * BT Controller before BT Host executes Reset sequence.*/
+		err = bt_dev.drv->callback(BT_HCI_EVENT_SETUP, NULL);
+		if (err) {
+			return err;
+		}
+	}
+#endif /* CONFIG_BT_HCI_EVENT_SETUP */
+
 	err = common_init();
 	if (err) {
 		return err;

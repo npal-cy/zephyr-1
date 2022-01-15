@@ -137,6 +137,19 @@ enum bt_hci_driver_bus {
 	BT_HCI_DRIVER_BUS_IPM           = 9,
 };
 
+/** HCI driver events */
+enum bt_hci_driver_event {
+	
+	/* This event is triggered by BT host on begining of HCI init. Setup event uses 
+	 * to executes vendor-specific commands sequence to initialize BT Controller
+	 * before BT Host executes Reset sequence.
+	 *
+	 * Event parameter returned with this event is pointer to the HCI transport
+	 * structure (refer to bt_hci_driver).
+	 */
+	BT_HCI_EVENT_SETUP                     = 0,
+};
+
 /**
  * @brief Abstraction which represents the HCI transport to the controller.
  *
@@ -185,6 +198,24 @@ struct bt_hci_driver {
 	 * @return 0 on success or negative error number on failure.
 	 */
 	int (*send)(struct net_buf *buf);
+
+	/** 
+	 *  @brief HCI driver callback
+	 *
+	 * Vendors can use this callback to implement extansion for BT HCI 
+	 * driver.  
+	 * 
+	 * @param event - HCI driver Event (refer to bt_hci_driver_event) 
+	 * 
+	 * @param event_param - Event parameter. It is pointer to void,
+	 *                      and should be casted to event-specific type.
+	 * 
+	 * Refer to bt_hci_driver_event enumeration for full list of 
+	 * events and detailed description each of them.
+	 *  
+	 * @return 0 on success, negative error value on failure
+	 */
+	int (*callback)(enum bt_hci_driver_event event, void* event_param);
 };
 
 /**
