@@ -113,8 +113,10 @@ if BT_H4
 
 config BT_CYW43XXX
 	bool "CYW43XXX BT connectivity"
-	select GPIO
+	default y
 	select BT_HCI_SETUP
+	depends on GPIO
+	depends on DT_HAS_INFINEON_CYW43XXX_BT_HCI_ENABLED
 	help
 	  Infineon's AIROC™ Wi-Fi & combos portfolio integrates
 	  IEEE 802.11a/b/g/n/ac/ax Wi-Fi and Bluetooth® 5.2 in a single-chip
@@ -148,8 +150,4 @@ config BT_HCI_SETUP
 	  configuration files. This option are enabled by the vendor-specific
 	  HCI extension, where the Setup function is implemented.
 
-if BT_CYW43XXX
-
 source "drivers/bluetooth/hci/Kconfig.infineon"
-
-endif # BT_CYW43XXX

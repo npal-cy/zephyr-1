@@ -2,14 +2,10 @@
 # an affiliate of Cypress Semiconductor Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-# Change size of command lengths. It for vendor commands related to
-# firmware downloading.
-config BT_BUF_CMD_TX_SIZE
-	default 255
+if BT_CYW43XXX
 
 choice  CYW43XXX_PART
 	prompt "Select CYW43XXX part"
-	depends on BT_CYW43XXX
 
 config CYW4343W
 	bool "CYW4343W"
@@ -46,11 +42,17 @@ config CYW43439
 	  More information about CYW43439 device you can find on
 	  https://www.infineon.com/cms/en/product/wireless-connectivity/airoc-wi-fi-plus-bluetooth-combos/cyw43439/
 
+config BT_CYW43XXX_CUSTOM
+	bool "Custom CYW43xx device/module"
+	help
+	  Select Custom CYW43xx device/module. For this option,
+	  user must to provide path to BT firmware HCD file for 
+	  custom or vendor CYW43xx modules in CYW43XX_CUSTOM_FIRMWARE_HCD_BLOB.
+endchoice
 
 choice CYW43012_MODULE
 	prompt "Select CYW43012 module"
 	depends on CYW43012
-	depends on BT_CYW43XXX
 
 config CYW43012_MURATA_1LV
 	bool "MURATA-1LV"
@@ -59,7 +61,6 @@ endchoice
 choice CYW4343W_MODULE
 	prompt "Select CYW4343W module"
 	depends on CYW4343W
-	depends on BT_CYW43XXX
 
 config CYW4343W_MURATA_1DX
 	bool "MURATA-1DX"
@@ -68,7 +69,6 @@ endchoice
 choice CYW4373_MODULE
 	prompt "Select CYW4373 module"
 	depends on CYW4373
-	depends on BT_CYW43XXX
 
 config CYW4373_STERLING_LWB5PLUS
 	bool "STERLING-LWB5plus"
@@ -77,16 +77,27 @@ endchoice
 choice CYW43439_MODULE
 	prompt "Select CYW43439 module"
 	depends on CYW43439
-	depends on BT_CYW43XXX
 
 config CYW43439_MURATA_1YN
 	bool "MURATA_1YN"
 endchoice
 
 config CYW43XX_CUSTOM_FIRMWARE_HCD_BLOB
+	depends on BT_CYW43XXX_CUSTOM
 	string  "Path to user BT firmware HCD file"
 	help
 	  Path to BT firmware HCD file for custom or vendor CYW43xx modules.
 	  It can be absolute path, or relative from project folder.
 
-endchoice
+# Change size of command lengths. It for vendor commands related to
+# firmware downloading.
+config BT_BUF_CMD_TX_SIZE
+	default 255
+
+# Disable ATT_ENFORCE_FLOW feature, CYW43XX informs about frees buffer 
+# (HCL Number Of Completed Packets event) after second packet.
+config BT_ATT_ENFORCE_FLOW
+	default n  
+
+endif # BT_CYW43XXX
+

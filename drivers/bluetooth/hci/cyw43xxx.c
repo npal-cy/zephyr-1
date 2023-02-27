@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022 Cypress Semiconductor Corporation (an Infineon company) or
+ * Copyright (c) 2023 Cypress Semiconductor Corporation (an Infineon company) or
  * an affiliate of Cypress Semiconductor Corporation
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -29,10 +29,10 @@ LOG_MODULE_REGISTER(cyw43xxx_driver);
 #define HCI_UART_NODE                     DT_COMPAT_GET_ANY_STATUS_OKAY(infineon_cyw43xxx_bt_hci)
 
 /* BT settling time after power on */
-#define BT_POWER_ON_SETTLING_TIME         (500u)
+#define BT_POWER_ON_SETTLING_TIME_MS      (500u)
 
 /* Stabilization delay after FW loading */
-#define BT_STABILIZATION_DELAY            (250)
+#define BT_STABILIZATION_DELAY_MS         (250u)
 
 /* HCI Command packet from Host to Controller */
 #define HCI_COMMAND_PACKET                (0x01)
@@ -65,7 +65,7 @@ int bt_h4_vnd_setup(const struct device *dev);
 static int bt_hci_uart_set_baudrate(const struct device *bt_uart_dev, uint32_t baudrate)
 {
 	struct uart_config uart_cfg;
-	int err = 0;
+	int err;
 
 	/* Get current UART configuration */
 	err = uart_config_get(bt_uart_dev, &uart_cfg);
@@ -149,7 +149,7 @@ static int bt_update_controller_baudrate(const struct device *bt_uart_dev, uint3
 
 static int bt_firmware_download(const uint8_t *firmware_image, uint32_t size)
 {
-	uint8_t *data = (uint8_t *) firmware_image;
+	uint8_t *data = (uint8_t *)firmware_image;
 	volatile uint32_t remaining_length = size;
 	struct net_buf *buf;
 	struct net_buf *rsp;
@@ -172,12 +172,12 @@ static int bt_firmware_download(const uint8_t *firmware_image, uint32_t size)
 	 */
 	while (remaining_length) {
 		size_t data_length = data[2]; /* data length from firmware image block */
-		uint16_t op_code = *(uint16_t *) data;
+		uint16_t op_code = *(uint16_t *)data;
 
 		/* Allocate buffer for hci_write_ram/hci_launch_ram command. */
 		buf = bt_hci_cmd_create(op_code, data_length);
 		if (buf == NULL) {
-			printk("Unable to allocate command buffer\n");
+			LOG_ERR("Unable to allocate command buffer\n");
 			return err;
 		}
 
@@ -206,7 +206,7 @@ static int bt_firmware_download(const uint8_t *firmware_image, uint32_t size)
 			break;
 
 		default:
-			return -1;
+			return -ENOMEM;
 		}
 		net_buf_unref(rsp);
 		net_buf_unref(buf);
@@ -218,7 +218,7 @@ static int bt_firmware_download(const uint8_t *firmware_image, uint32_t size)
 
 int bt_h4_vnd_setup(const struct device *dev)
 {
-	uint32_t baudrate_for_fw_download = DT_PROP(HCI_UART_NODE, baudrate_for_fw_download);
+	uint32_t baudrate_for_fw_download = DT_PROP(HCI_UART_NODE, fw_download_speed);
 	uint32_t baudrate_for_operation = DT_PROP(DT_CHOSEN(zephyr_bt_uart), current_speed);
 	struct gpio_dt_spec bt_reg_on = GPIO_DT_SPEC_GET(HCI_UART_NODE, bt_reg_on_gpios);
 
@@ -232,7 +232,7 @@ int bt_h4_vnd_setup(const struct device *dev)
 
 	/* Check BT REG_ON gpio instance */
 	if (!device_is_ready(bt_reg_on.port)) {
-		printk("Error: failed to configure bt_reg_on %s pin %d\n",
+		LOG_ERR("Error: failed to configure bt_reg_on %s pin %d\n",
 		       bt_reg_on.port->name, bt_reg_on.pin);
 		return -EIO;
 	}
@@ -240,7 +240,7 @@ int bt_h4_vnd_setup(const struct device *dev)
 	/* Configure bt_reg_on as output  */
 	err = gpio_pin_configure_dt(&bt_reg_on, GPIO_OUTPUT | GPIO_PULL_UP);
 	if (err) {
-		printk("Error %d: failed to configure bt_reg_on %s pin %d\n",
+		LOG_ERR("Error %d: failed to configure bt_reg_on %s pin %d\n",
 		       err, bt_reg_on.port->name, bt_reg_on.pin);
 		return err;
 	}
@@ -250,7 +250,7 @@ int bt_h4_vnd_setup(const struct device *dev)
 	}
 
 	/* BT settling time after power on */
-	(void)k_msleep(BT_POWER_ON_SETTLING_TIME);
+	(void)k_msleep(BT_POWER_ON_SETTLING_TIME_MS);
 
 	/* Set default baudrate */
 	err = bt_hci_uart_set_baudrate(dev, HCI_UART_DEFAULT_BAUDRATE);
@@ -280,7 +280,7 @@ int bt_h4_vnd_setup(const struct device *dev)
 	}
 
 	/* Stabilization delay */
-	(void)k_msleep(BT_STABILIZATION_DELAY);
+	(void)k_msleep(BT_STABILIZATION_DELAY_MS);
 
 	/* When FW launched, HCI UART baudrate should be configured to default */
 	if (baudrate_for_fw_download != HCI_UART_DEFAULT_BAUDRATE) {

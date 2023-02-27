@@ -13,17 +13,23 @@ include: base.yaml
 
 properties:
     bt-reg-on-gpios:
+      description:
+        BT Reg ON gpio
       type: phandle-array
-      required: false
+      required: true
 
     bt-host-wake-gpios:
+      description:
+        BT Host wakeup gpio
       type: phandle-array
-      required: false
 
     bt-dev-wake-gpios:
+      description:
+        BT Device wakeup gpio
       type: phandle-array
-      required: false
 
-    baudrate_for_fw_download:
-       type: int
-       default: 3000000
+    fw-download-speed:
+      type: int
+      description:
+        HCI Uart boudrate for FW dowload operation
+      default: 3000000
