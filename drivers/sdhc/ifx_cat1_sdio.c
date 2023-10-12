@@ -89,7 +89,7 @@ cy_stc_sd_host_sd_card_config_t sd_host_sd_card_config = {
 };
 
 /* List of available SDHC instances */
-static SDHC_Type *const _CYHAL_SDHC_BASE_ADDRESSES[CY_IP_MXSDHC_INSTANCES] = {
+static SDHC_Type *const IFX_CAT1_SDHC_BASE_ADDRESSES[CY_IP_MXSDHC_INSTANCES] = {
 #ifdef SDHC0
 	SDHC0,
 #endif /* ifdef SDHC0 */
@@ -104,17 +104,14 @@ static int32_t _get_hw_block_num(SDHC_Type *reg_addr)
 	uint32_t i;
 
 	for (i = 0u; i < CY_IP_MXSDHC_INSTANCES; i++) {
-		if (_CYHAL_SDHC_BASE_ADDRESSES[i] == reg_addr) {
+		if (IFX_CAT1_SDHC_BASE_ADDRESSES[i] == reg_addr) {
 			return i;
 		}
 	}
 
-	return -1;
+	return -EINVAL;
 }
 
-/*
- * Reset SDHC controller
- */
 static int ifx_cat1_sdio_reset(const struct device *dev)
 {
 	struct ifx_cat1_sdio_data *dev_data = dev->data;
@@ -198,6 +195,7 @@ static int ifx_cat1_sdio_request(const struct device *dev, struct sdhc_command *
 			LOG_ERR("cyhal_sdio_bulk_transfer failed ret = %d \r\n", ret);
 		}
 		break;
+
 	default:
 		ret = -ENOTSUP;
 	}
@@ -222,7 +220,6 @@ static int ifx_cat1_sdio_get_host_props(const struct device *dev, struct sdhc_ho
 	props->host_caps.sdr50_support = true;
 	props->host_caps.sdio_async_interrupt_support = true;
 	props->host_caps.vol_330_support = true;
-	props->host_caps.bus_8_bit_support = true;
 
 	return 0;
 }
@@ -280,9 +277,6 @@ static void ifx_cat1_sdio_event_callback(void *callback_arg, cyhal_sdio_event_t 
 	}
 }
 
-/*
- * Init for SDHC
- */
 static int ifx_cat1_sdio_init(const struct device *dev)
 {
 	cy_rslt_t ret;
@@ -341,7 +335,7 @@ static const struct sdhc_driver_api ifx_cat1_sdio_api = {
 	static struct ifx_cat1_sdio_data ifx_cat1_sdio_##n##_data;                                 \
                                                                                                    \
 	DEVICE_DT_INST_DEFINE(n, &ifx_cat1_sdio_init, NULL, &ifx_cat1_sdio_##n##_data,             \
-			      &ifx_cat1_sdio_##n##_config, POST_KERNEL, 70, &ifx_cat1_sdio_api);
+			      &ifx_cat1_sdio_##n##_config, POST_KERNEL, CONFIG_SDHC_INIT_PRIORITY, \
+			      &ifx_cat1_sdio_api);
 
 DT_INST_FOREACH_STATUS_OKAY(IFX_CAT1_SDHC_INIT)
-/* TODO: check  CONFIG_SDHC_INIT_PRIORITY */

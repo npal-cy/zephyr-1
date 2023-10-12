@@ -17,6 +17,7 @@ source "drivers/sdhc/Kconfig.intel"
 
 config SDHC_INIT_PRIORITY
 	int "SDHC driver init priority"
+	default 70 if SDHC_INFINEON_CAT1
 	default 85
 	help
 	  SDHC driver system init priority
