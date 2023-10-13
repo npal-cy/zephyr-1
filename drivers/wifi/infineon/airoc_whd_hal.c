@@ -439,7 +439,7 @@ whd_result_t whd_bus_sdio_enable_oob_intr(whd_driver_t whd_driver, whd_bool_t en
 
 	/* Enable OOB pin interrupts */
 	result = gpio_pin_interrupt_configure_dt(oob_config->host_oob_pin,
-						 GPIO_INT_ENABLE | trig_conf);
+						 GPIO_INT_ENABLE | GPIO_INT_EDGE | trig_conf);
 	if (result != 0) {
 		WPRINT_WHD_ERROR(("%s: Failed at gpio_pin_interrupt_configure_dt for host_oob_pin, "
 				  "result code = %d\n",
