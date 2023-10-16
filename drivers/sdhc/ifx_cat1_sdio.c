@@ -289,7 +289,7 @@ static int ifx_cat1_sdio_init(const struct device *dev)
 		return ret;
 	}
 
-	/* Dedicate SCB HW resource */
+	/* Dedicate SDIO HW resource */
 	data->hw_resource.type = CYHAL_RSC_SDIODEV;
 	data->hw_resource.block_num = _get_hw_block_num(config->reg_addr);
 
@@ -307,9 +307,13 @@ static int ifx_cat1_sdio_init(const struct device *dev)
 	/* Register callback for SDIO events */
 	cyhal_sdio_register_callback(&data->sdio_obj, ifx_cat1_sdio_event_callback, (void *)dev);
 
-	k_mutex_init(&data->access_mutex);
+	ret = k_mutex_init(&data->access_mutex);
+	if (ret) {
+		cyhal_sdio_free(&data->sdio_obj);
+		return ret;
+	}
 
-	return ret;
+	return 0;
 }
 
 static const struct sdhc_driver_api ifx_cat1_sdio_api = {
