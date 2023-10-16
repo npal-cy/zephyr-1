@@ -201,7 +201,7 @@ int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface
 			whd_deinit(*interface);
 		}
 	}
-	return result;
+	return (result == CY_RSLT_SUCCESS) ? 0 : -ENODEV;
 }
 
 /*
@@ -218,8 +218,8 @@ whd_result_t whd_bus_sdio_cmd52(whd_driver_t whd_driver, whd_bus_transfer_direct
 				   .response_type = SD_RSP_TYPE_R5,
 				   .timeout_ms = CONFIG_SD_CMD_TIMEOUT};
 
-	arg.cmd52.function_number = (uint32_t)(function & BUS_FUNCTION_MASK);
-	arg.cmd52.register_address = (uint32_t)(address & 0x00001ffff);
+	arg.cmd52.function_number = (uint32_t)function;
+	arg.cmd52.register_address = (uint32_t)address;
 	arg.cmd52.rw_flag = (uint32_t)((direction == BUS_WRITE) ? 1 : 0);
 	arg.cmd52.write_data = value;
 	cmd.arg = arg.value;
@@ -259,8 +259,8 @@ whd_result_t whd_bus_sdio_cmd53(whd_driver_t whd_driver, whd_bus_transfer_direct
 		WHD_BUS_STATS_INCREMENT_VARIABLE(whd_driver->bus_priv, cmd53_read);
 	}
 
-	arg.cmd53.function_number = (uint32_t)(function & BUS_FUNCTION_MASK);
-	arg.cmd53.register_address = (uint32_t)(address & BIT_MASK(17));
+	arg.cmd53.function_number = (uint32_t)function;
+	arg.cmd53.register_address = (uint32_t)address;
 	arg.cmd53.op_code = (uint32_t)1;
 	arg.cmd53.rw_flag = (uint32_t)((direction == BUS_WRITE) ? 1 : 0);
 
@@ -270,7 +270,7 @@ whd_result_t whd_bus_sdio_cmd53(whd_driver_t whd_driver, whd_bus_transfer_direct
 		arg.cmd53.count = (uint32_t)(data_size & 0x1FF);
 
 	} else {
-		arg.cmd53.count = (uint32_t)((data_size / (uint16_t)SDIO_64B_BLOCK) & BIT_MASK(9));
+		arg.cmd53.count = (uint32_t)(data_size / (uint16_t)SDIO_64B_BLOCK);
 		if ((uint32_t)(arg.cmd53.count * (uint16_t)SDIO_64B_BLOCK) < data_size) {
 			++arg.cmd53.count;
 		}
@@ -326,16 +326,17 @@ whd_result_t whd_bus_sdio_irq_register(whd_driver_t whd_driver)
 
 whd_result_t whd_bus_sdio_irq_enable(whd_driver_t whd_driver, whd_bool_t enable)
 {
+	int result;
 	struct sd_card *sd = (struct sd_card *)whd_driver->bus_priv->sdio_obj;
 
 	/* Enable/disable SDIO Card interrupts */
 	if (enable) {
-		sdhc_enable_interrupt(sd->sdhc, whd_bus_sdio_irq_handler, SDHC_INT_SDIO,
+		result = sdhc_enable_interrupt(sd->sdhc, whd_bus_sdio_irq_handler, SDHC_INT_SDIO,
 				      whd_driver);
 	} else {
-		sdhc_disable_interrupt(sd->sdhc, SDHC_INT_SDIO);
+		result = sdhc_disable_interrupt(sd->sdhc, SDHC_INT_SDIO);
 	}
-	return WHD_SUCCESS;
+	return result;
 }
 
 /*
