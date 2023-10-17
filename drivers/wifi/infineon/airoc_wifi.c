@@ -67,6 +67,7 @@ struct airoc_wifi_event_t {
 };
 
 whd_interface_t airoc_if;
+whd_interface_t airoc_sta_if;
 whd_interface_t airoc_ap_if;
 
 static const whd_event_num_t sta_link_events[] = {
@@ -209,15 +210,7 @@ void cy_network_process_ethernet_data(whd_interface_t interface, whd_buffer_t bu
 	uint32_t len = whd_buffer_get_current_piece_size(interface->whd_driver, buffer);
 	bool net_pkt_unref_flag = false;
 
-	if ((interface->role == WHD_STA_ROLE) &&
-	    (net_if_flag_is_set(airoc_wifi_iface, NET_IF_UP))) {
-		
-		/* Release network buffer if network interface is unavailable */
-		if (airoc_wifi_iface == NULL) {
-			LOG_ERR("network interface unavailable");
-			cy_buffer_release(buffer, WHD_NETWORK_RX);
-			return;
-		}
+	if ((airoc_wifi_iface != NULL) && net_if_flag_is_set(airoc_wifi_iface, NET_IF_UP)) {
 
 		pkt = net_pkt_rx_alloc_with_buffer(airoc_wifi_iface, len, AF_UNSPEC, 0, K_NO_WAIT);
 
@@ -235,6 +228,7 @@ void cy_network_process_ethernet_data(whd_interface_t interface, whd_buffer_t bu
 			LOG_ERR("Failed to get net buffer");
 		}
 	}
+
 	/* Release a packet buffer */
 	cy_buffer_release(buffer, WHD_NETWORK_RX);
 
@@ -295,14 +289,15 @@ static void airoc_mgmt_init(struct net_if *iface)
 	airoc_wifi_iface = iface;
 
 	/* Read WLAN MAC Address */
-	if(whd_wifi_get_mac_address(airoc_if, &airoc_if->mac_addr) != WHD_SUCCESS) {
+	if (whd_wifi_get_mac_address(airoc_sta_if, &airoc_sta_if->mac_addr) != WHD_SUCCESS) {
 		LOG_ERR("Failed to get mac address");
 	} else {
-		(void)memcpy(&data->mac_addr, &airoc_if->mac_addr, sizeof(airoc_if->mac_addr));
+		(void)memcpy(&data->mac_addr, &airoc_sta_if->mac_addr,
+			     sizeof(airoc_sta_if->mac_addr));
 	}
-	
+
 	/* Assign link local address. */
-	if(net_if_set_link_addr(iface, data->mac_addr, 6, NET_LINK_ETHERNET)){
+	if (net_if_set_link_addr(iface, data->mac_addr, 6, NET_LINK_ETHERNET)) {
 		LOG_ERR("Failed to set link addr");
 	}
 
@@ -334,12 +329,11 @@ static void scan_cb_search(whd_scan_result_t **result_ptr, void *user_data,
 
 	if (status == WHD_SCAN_COMPLETED_SUCCESSFULLY) {
 		k_sem_give(&airoc_wifi_data.sema_scan);
-	} else if ((status == WHD_SCAN_INCOMPLETE) &&
-		   (user_data != NULL) && ((**result_ptr).SSID.length > 0)) {
-		
-		if (strncmp (((whd_scan_result_t *)user_data)->SSID.value,
-			        (**result_ptr).SSID.value, 
-				(**result_ptr).SSID.length) == 0) {
+	} else if ((status == WHD_SCAN_INCOMPLETE) && (user_data != NULL) &&
+		   ((**result_ptr).SSID.length > 0)) {
+
+		if (strncmp(((whd_scan_result_t *)user_data)->SSID.value, (**result_ptr).SSID.value,
+			    (**result_ptr).SSID.length) == 0) {
 			memcpy(user_data, *result_ptr, sizeof(whd_scan_result_t));
 		}
 	}
@@ -348,6 +342,7 @@ static void scan_cb_search(whd_scan_result_t **result_ptr, void *user_data,
 static int convert_whd_security_to_zephyr(whd_security_t security)
 {
 	int zephyr_security = WIFI_SECURITY_TYPE_UNKNOWN;
+
 	switch (security) {
 	case WHD_SECURITY_OPEN:
 		zephyr_security = WIFI_SECURITY_TYPE_NONE;
@@ -404,7 +399,7 @@ static void scan_callback(whd_scan_result_t **result_ptr, void *user_data, whd_s
 	if (status == WHD_SCAN_COMPLETED_SUCCESSFULLY || status == WHD_SCAN_ABORTED) {
 		data->scan_rslt_cb(data->iface, 0, NULL);
 		data->scan_rslt_cb = NULL;
-		/* NOTE: It is complete of scan packet, do not need to clean result_ptr, 
+		/* NOTE: It is complete of scan packet, do not need to clean result_ptr,
 		 * WHD will release result_ptr buffer */
 		return;
 	}
@@ -435,7 +430,7 @@ static int airoc_mgmt_scan(const struct device *dev, struct wifi_scan_params *pa
 		return -EAGAIN;
 	}
 
-	ret = whd_wifi_scan(airoc_if, params->scan_type, WHD_BSS_TYPE_ANY, &(data->ssid), NULL,
+	ret = whd_wifi_scan(airoc_sta_if, params->scan_type, WHD_BSS_TYPE_ANY, &(data->ssid), NULL,
 			    NULL, NULL, scan_callback, &(data->scan_result), data);
 
 	k_sem_give(&data->sema_common);
@@ -458,6 +453,12 @@ static int airoc_mgmt_connect(const struct device *dev, struct wifi_connect_req_
 		goto error;
 	}
 
+	if (data->is_ap_up) {
+		LOG_ERR("Network interface is busy AP. Please first disable AP.");
+		ret = -EBUSY;
+		goto error;
+	}
+
 	ssid.length = params->ssid_length;
 	memcpy(ssid.value, params->ssid, params->ssid_length);
 
@@ -467,15 +468,15 @@ static int airoc_mgmt_connect(const struct device *dev, struct wifi_connect_req_
 	usr_result.SSID.length = ssid.length;
 	memcpy(usr_result.SSID.value, ssid.value, ssid.length);
 
-	if (whd_wifi_scan(airoc_if, WHD_SCAN_TYPE_ACTIVE, WHD_BSS_TYPE_ANY, NULL, NULL, NULL, NULL,
-			  scan_cb_search, &scan_result, &(usr_result)) != WHD_SUCCESS) {
+	if (whd_wifi_scan(airoc_sta_if, WHD_SCAN_TYPE_ACTIVE, WHD_BSS_TYPE_ANY, NULL, NULL, NULL,
+			  NULL, scan_cb_search, &scan_result, &(usr_result)) != WHD_SUCCESS) {
 		LOG_ERR("Failed start scan");
 		ret = -EAGAIN;
 		goto error;
 	}
 
 	if (k_sem_take(&airoc_wifi_data.sema_scan, K_MSEC(AIROC_WIFI_SCAN_TIMEOUT_MS)) != 0) {
-		whd_wifi_stop_scan(airoc_if);
+		whd_wifi_stop_scan(airoc_sta_if);
 		ret = -EAGAIN;
 		goto error;
 	}
@@ -487,7 +488,7 @@ static int airoc_mgmt_connect(const struct device *dev, struct wifi_connect_req_
 	}
 
 	/* Connect to the network */
-	if (whd_wifi_join(airoc_if, &usr_result.SSID, usr_result.security, params->psk,
+	if (whd_wifi_join(airoc_sta_if, &usr_result.SSID, usr_result.security, params->psk,
 			  params->psk_length) != WHD_SUCCESS) {
 		LOG_ERR("Failed to connect with network");
 		printf("Failed to connect with network\n\r");
@@ -521,7 +522,7 @@ static int airoc_mgmt_disconnect(const struct device *dev)
 		return -EAGAIN;
 	}
 
-	if (whd_wifi_leave(airoc_if) != WHD_SUCCESS) {
+	if (whd_wifi_leave(airoc_sta_if) != WHD_SUCCESS) {
 		k_sem_give(&data->sema_common);
 		ret = -EAGAIN;
 	} else {
@@ -554,25 +555,31 @@ static int airoc_mgmt_ap_enable(const struct device *dev, struct wifi_connect_re
 	whd_security_t security;
 	whd_ssid_t ssid = {0};
 	uint8_t channel = 0;
-	int result = 0;
+	int ret = 0;
 
 	if (k_sem_take(&data->sema_common, K_MSEC(AIROC_WIFI_WAIT_SEMA_MS)) != 0) {
 		return -EAGAIN;
+	}
+
+	if (data->is_sta_connected) {
+		LOG_ERR("Network interface is busy STA. Please first disconnect STA.");
+		ret = -EBUSY;
+		goto error;
 	}
 
 	if (data->second_interface_init == 0) {
 		if (whd_add_secondary_interface(data->whd_drv, NULL, &airoc_ap_if) !=
 		    CY_RSLT_SUCCESS) {
 			LOG_ERR("Error Unable to bring up the whd secondary interface");
-			result = -EAGAIN;
+			ret = -EAGAIN;
 			goto error;
 		}
 		data->second_interface_init = 1;
 	}
 
 	if (data->is_ap_up) {
-		LOG_ERR("Already AP is on - first disconnect");
-		result = -EAGAIN;
+		LOG_ERR("Already AP is on - first disable");
+		ret = -EAGAIN;
 		goto error;
 	}
 
@@ -580,7 +587,7 @@ static int airoc_mgmt_ap_enable(const struct device *dev, struct wifi_connect_re
 	memcpy((void *)ssid.value, (void *)params->ssid, ssid.length);
 
 	/* make sure to set valid channels for 2G and 5G:
-	 * - 2G channels from1 to 11,  
+	 * - 2G channels from1 to 11,
 	 * - 5G channels from 36 to 165
 	 */
 	if (((params->channel > 0) && (params->channel < 12)) ||
@@ -599,13 +606,13 @@ static int airoc_mgmt_ap_enable(const struct device *dev, struct wifi_connect_re
 	if (whd_wifi_init_ap(airoc_ap_if, &ssid, security, (const uint8_t *)params->psk,
 			     params->psk_length, channel) != 0) {
 		LOG_ERR("Failed to init whd ap interface");
-		result = -EAGAIN;
+		ret = -EAGAIN;
 		goto error;
 	}
 
 	if (whd_wifi_start_ap(airoc_ap_if) != 0) {
 		LOG_ERR("Failed to start whd ap interface");
-		result = -EAGAIN;
+		ret = -EAGAIN;
 		goto error;
 	}
 
@@ -613,15 +620,16 @@ static int airoc_mgmt_ap_enable(const struct device *dev, struct wifi_connect_re
 	if (whd_management_set_event_handler(airoc_ap_if, ap_link_events, ap_link_events_handler,
 					     NULL, &ap_event_handler_index) != 0) {
 		whd_wifi_stop_ap(airoc_ap_if);
-		result = -EAGAIN;
+		ret = -EAGAIN;
 		goto error;
 	}
 
 	data->is_ap_up = 1;
+	airoc_if = airoc_ap_if;
 error:
 
 	k_sem_give(&data->sema_common);
-	return result;
+	return ret;
 }
 
 #if defined(CONFIG_NET_STATISTICS_WIFI)
@@ -655,15 +663,14 @@ static int airoc_mgmt_ap_disable(const struct device *dev)
 		return -EAGAIN;
 	}
 
-	if(whd_wifi_deregister_event_handler(airoc_ap_if, ap_event_handler_index))
-	{
+	if (whd_wifi_deregister_event_handler(airoc_ap_if, ap_event_handler_index)) {
 		LOG_ERR("Can't whd_wifi_deregister_event_handler");
 	}
 
 	result = whd_wifi_stop_ap(airoc_ap_if);
-	if(result == CY_RSLT_SUCCESS){
+	if (result == CY_RSLT_SUCCESS) {
 		data->is_ap_up = 0;
-
+		airoc_if = airoc_sta_if;
 	} else {
 		LOG_ERR("Can't stop wifi ap: %u", result);
 	}
@@ -689,29 +696,30 @@ static int airoc_init(const struct device *dev)
 	}
 	k_thread_name_set(tid, "airoc_event");
 
-	ret = airoc_wifi_init_primary(dev, &airoc_if);
+	ret = airoc_wifi_init_primary(dev, &airoc_sta_if);
 	if (ret != CY_RSLT_SUCCESS) {
 		LOG_ERR("airoc_wifi_init_primary failed ret = %d \r\n", ret);
-		return -EAGAIN; 
+		return -EAGAIN;
 	}
+	airoc_if = airoc_sta_if;
 
-	ret = whd_management_set_event_handler(airoc_if, sta_link_events, link_events_handler, NULL,
-					       &sta_event_handler_index);
+	ret = whd_management_set_event_handler(airoc_sta_if, sta_link_events, link_events_handler,
+					       NULL, &sta_event_handler_index);
 	if (ret != CY_RSLT_SUCCESS) {
 		LOG_ERR("whd_management_set_event_handler failed ret = %d \r\n", ret);
-		return -EAGAIN; 
+		return -EAGAIN;
 	}
 
 	ret = k_sem_init(&data->sema_common, 1, 1);
 	if (ret != 0) {
 		LOG_ERR("k_sem_init(sema_common) failure");
-		return -ret; 
+		return -ret;
 	}
 
 	ret = k_sem_init(&data->sema_scan, 0, 1);
 	if (ret != 0) {
 		LOG_ERR("k_sem_init(sema_scan) failure");
-		return -ret; 
+		return -ret;
 	}
 
 	return ret;
