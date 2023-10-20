@@ -9,7 +9,6 @@ compatible: "infineon,cat1-sdhc-sdio"
 
 include: [sdhc.yaml, pinctrl-device.yaml]
 
-
 properties:
   reg:
     required: true

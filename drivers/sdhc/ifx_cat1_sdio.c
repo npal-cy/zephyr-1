@@ -76,11 +76,11 @@ struct ifx_cat1_sdio_data {
 	sdhc_interrupt_cb_t sdio_cb;
 };
 
-uint32_t sdio_rca;
-const cy_stc_sd_host_init_config_t host_config = {false, CY_SD_HOST_DMA_ADMA2, false};
-cy_en_sd_host_card_capacity_t sd_host_card_capacity = CY_SD_HOST_SDSC;
-cy_en_sd_host_card_type_t sd_host_card_type = CY_SD_HOST_NOT_EMMC;
-cy_stc_sd_host_sd_card_config_t sd_host_sd_card_config = {
+static uint32_t sdio_rca;
+static const cy_stc_sd_host_init_config_t host_config = {false, CY_SD_HOST_DMA_ADMA2, false};
+static cy_en_sd_host_card_capacity_t sd_host_card_capacity = CY_SD_HOST_SDSC;
+static cy_en_sd_host_card_type_t sd_host_card_type = CY_SD_HOST_NOT_EMMC;
+static cy_stc_sd_host_sd_card_config_t sd_host_sd_card_config = {
 	.lowVoltageSignaling = false,
 	.busWidth = CY_SD_HOST_BUS_WIDTH_4_BIT,
 	.cardType = &sd_host_card_type,
@@ -153,14 +153,14 @@ static int ifx_cat1_sdio_card_busy(const struct device *dev)
 {
 	struct ifx_cat1_sdio_data *dev_data = dev->data;
 
-	return cyhal_sdio_is_busy(&dev_data->sdio_obj) ? 0 : 1;
+	return cyhal_sdio_is_busy(&dev_data->sdio_obj) ? 1 : 0;
 }
 
 static int ifx_cat1_sdio_request(const struct device *dev, struct sdhc_command *cmd,
 				 struct sdhc_data *data)
 {
 	struct ifx_cat1_sdio_data *dev_data = dev->data;
-	int ret = 0;
+	int ret;
 
 	/* Ensure we have exclusive access to SD card before sending request */
 	if (k_mutex_lock(&dev_data->access_mutex, K_MSEC(cmd->timeout_ms)) != 0) {
@@ -230,6 +230,10 @@ static int ifx_cat1_sdio_enable_interrupt(const struct device *dev, sdhc_interru
 	struct ifx_cat1_sdio_data *data = dev->data;
 	const struct ifx_cat1_sdio_config *cfg = dev->config;
 
+	if (sources != SDHC_INT_SDIO) {
+		return -ENOTSUP;
+	}
+
 	if (callback == NULL) {
 		return -EINVAL;
 	}
@@ -239,12 +243,9 @@ static int ifx_cat1_sdio_enable_interrupt(const struct device *dev, sdhc_interru
 	data->sdio_cb_user_data = user_data;
 
 	/* Enable CARD INTERRUPT event */
-	if (sources == SDHC_INT_SDIO) {
-		cyhal_sdio_enable_event(&data->sdio_obj, CYHAL_SDIO_CARD_INTERRUPT,
-					cfg->irq_priority, true);
-	} else {
-		return -ENOTSUP;
-	}
+	cyhal_sdio_enable_event(&data->sdio_obj, CYHAL_SDIO_CARD_INTERRUPT,
+				cfg->irq_priority, true);
+
 	return 0;
 }
 
@@ -253,16 +254,16 @@ static int ifx_cat1_sdio_disable_interrupt(const struct device *dev, int sources
 	struct ifx_cat1_sdio_data *data = dev->data;
 	const struct ifx_cat1_sdio_config *cfg = dev->config;
 
+	if (sources != SDHC_INT_SDIO) {
+		return -ENOTSUP;
+	}
+
 	data->sdio_cb = NULL;
 	data->sdio_cb_user_data = NULL;
 
 	/* Disable CARD INTERRUPT event */
-	if (sources == SDHC_INT_SDIO) {
-		cyhal_sdio_enable_event(&data->sdio_obj, CYHAL_SDIO_CARD_INTERRUPT,
-					cfg->irq_priority, false);
-	} else {
-		return -ENOTSUP;
-	}
+	cyhal_sdio_enable_event(&data->sdio_obj, CYHAL_SDIO_CARD_INTERRUPT,
+				cfg->irq_priority, false);
 
 	return 0;
 }

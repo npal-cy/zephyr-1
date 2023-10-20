@@ -539,7 +539,7 @@
 		};
 
 		sdhc0: sdhc@40460000 {
-			compatible = "infineon,cat1-sdhc";
+			compatible = "infineon,cat1-sdhc-sdio";
 			reg = <0x40460000 0x2000>;
 			interrupts = <164 6>;
 			status = "disabled";
