@@ -46,6 +46,7 @@ struct airoc_wifi_data {
 #endif
 	whd_driver_t whd_drv;
 	struct gpio_callback host_oob_pin_cb;
+	uint8_t frame_buf[NET_ETH_MAX_FRAME_SIZE];
 };
 
 struct airoc_wifi_config {

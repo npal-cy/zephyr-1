@@ -85,7 +85,7 @@ extern whd_resource_source_t resource_ops;
 struct whd_bus_priv {
 	whd_sdio_config_t sdio_config;
 	whd_bus_stats_t whd_bus_stats;
-	whd_sdio_t *sdio_obj;
+	whd_sdio_t sdio_obj;
 };
 
 static whd_init_config_t init_config_default = {
@@ -114,10 +114,10 @@ static whd_netif_funcs_t netif_if_default = {
 
 int airoc_wifi_power_on(const struct device *dev)
 {
-	int result = 0;
+#if DT_INST_NODE_HAS_PROP(0, wifi_reg_on_gpios)
+	int ret;
 	const struct airoc_wifi_config *config = dev->config;
 
-#if DT_INST_NODE_HAS_PROP(0, wifi_reg_on_gpios)
 	/* Check WIFI REG_ON gpio instance */
 	if (!device_is_ready(config->wifi_reg_on_gpio.port)) {
 		LOG_ERR("Error: failed to configure wifi_reg_on %s pin %d",
@@ -126,29 +126,29 @@ int airoc_wifi_power_on(const struct device *dev)
 	}
 
 	/* Configure wifi_reg_on as output  */
-	result = gpio_pin_configure_dt(&config->wifi_reg_on_gpio, GPIO_OUTPUT);
-	if (result) {
-		LOG_ERR("Error %d: failed to configure wifi_reg_on %s pin %d", result,
+	ret = gpio_pin_configure_dt(&config->wifi_reg_on_gpio, GPIO_OUTPUT);
+	if (ret) {
+		LOG_ERR("Error %d: failed to configure wifi_reg_on %s pin %d", ret,
 			config->wifi_reg_on_gpio.port->name, config->wifi_reg_on_gpio.pin);
-		return result;
+		return ret;
 	}
-	result = gpio_pin_set_dt(&config->wifi_reg_on_gpio, 0);
-	if (result) {
-		return result;
+	ret = gpio_pin_set_dt(&config->wifi_reg_on_gpio, 0);
+	if (ret) {
+		return ret;
 	}
 
 	/* Allow CBUCK regulator to discharge */
 	(void)cyhal_system_delay_ms(WLAN_CBUCK_DISCHARGE_MS);
 
 	/* WIFI power on */
-	result = gpio_pin_set_dt(&config->wifi_reg_on_gpio, 1);
-	if (result) {
-		return result;
+	ret = gpio_pin_set_dt(&config->wifi_reg_on_gpio, 1);
+	if (ret) {
+		return ret;
 	}
 	(void)cyhal_system_delay_ms(WLAN_POWER_UP_DELAY_MS);
 #endif /* DT_INST_NODE_HAS_PROP(0, reg_on_gpios) */
 
-	return result;
+	return 0;
 }
 
 int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface)
@@ -187,21 +187,22 @@ int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface
 		return ret;
 	}
 
-	cy_rslt_t result = whd_init(&data->whd_drv, &init_config_default, &resource_ops,
+	cy_rslt_t whd_ret = whd_init(&data->whd_drv, &init_config_default, &resource_ops,
 				    &buffer_if_default, &netif_if_default);
-	if (result == CY_RSLT_SUCCESS) {
-		result = whd_bus_sdio_attach(data->whd_drv, &whd_sdio_config,
+	if (whd_ret == CY_RSLT_SUCCESS) {
+		whd_ret = whd_bus_sdio_attach(data->whd_drv, &whd_sdio_config,
 					     (whd_sdio_t)&data->card);
 
-		if (result == CY_RSLT_SUCCESS) {
-			result = whd_wifi_on(data->whd_drv, interface);
+		if (whd_ret == CY_RSLT_SUCCESS) {
+			whd_ret = whd_wifi_on(data->whd_drv, interface);
 		}
 
-		if (result != CY_RSLT_SUCCESS) {
+		if (whd_ret != CY_RSLT_SUCCESS) {
 			whd_deinit(*interface);
+			return -ENODEV;
 		}
 	}
-	return (result == CY_RSLT_SUCCESS) ? 0 : -ENODEV;
+	return 0;
 }
 
 /*
@@ -211,12 +212,14 @@ whd_result_t whd_bus_sdio_cmd52(whd_driver_t whd_driver, whd_bus_transfer_direct
 				whd_bus_function_t function, uint32_t address, uint8_t value,
 				sdio_response_needed_t response_expected, uint8_t *response)
 {
-	whd_result_t result;
-	struct sd_card *sd = (struct sd_card *)whd_driver->bus_priv->sdio_obj;
+	int ret;
+	struct sd_card *sd = whd_driver->bus_priv->sdio_obj;
 	sdio_cmd_argument_t arg = {0};
-	struct sdhc_command cmd = {.opcode = SDIO_RW_DIRECT,
-				   .response_type = SD_RSP_TYPE_R5,
-				   .timeout_ms = CONFIG_SD_CMD_TIMEOUT};
+	struct sdhc_command cmd = {
+		.opcode = SDIO_RW_DIRECT,
+		.response_type = SD_RSP_TYPE_R5,
+		.timeout_ms = CONFIG_SD_CMD_TIMEOUT
+	};
 
 	arg.cmd52.function_number = (uint32_t)function;
 	arg.cmd52.register_address = (uint32_t)address;
@@ -225,20 +228,20 @@ whd_result_t whd_bus_sdio_cmd52(whd_driver_t whd_driver, whd_bus_transfer_direct
 	cmd.arg = arg.value;
 	WHD_BUS_STATS_INCREMENT_VARIABLE(whd_driver->bus_priv, cmd52);
 
-	result = sdhc_request(sd->sdhc, &cmd, NULL);
+	ret = sdhc_request(sd->sdhc, &cmd, NULL);
 
-	WHD_BUS_STATS_CONDITIONAL_INCREMENT_VARIABLE(whd_driver->bus_priv, (result != WHD_SUCCESS),
+	WHD_BUS_STATS_CONDITIONAL_INCREMENT_VARIABLE(whd_driver->bus_priv, (ret != WHD_SUCCESS),
 						     cmd52_fail);
 	if (response != NULL) {
 		*response = cmd.response[0U] & SDIO_DIRECT_CMD_DATA_MASK;
 	}
 
 	/* Possibly device might not respond to this cmd. So, don't check return value here */
-	if ((result != WHD_SUCCESS) && (address == SDIO_SLEEP_CSR)) {
-		return result;
+	if ((ret != WHD_SUCCESS) && (address == SDIO_SLEEP_CSR)) {
+		return ret;
 	}
 
-	CHECK_RETURN(result);
+	CHECK_RETURN(ret);
 	return WHD_SUCCESS;
 }
 
@@ -247,8 +250,8 @@ whd_result_t whd_bus_sdio_cmd53(whd_driver_t whd_driver, whd_bus_transfer_direct
 				uint32_t address, uint16_t data_size, uint8_t *data,
 				sdio_response_needed_t response_expected, uint32_t *response)
 {
-	whd_result_t result;
-	struct sd_card *sd = (struct sd_card *)whd_driver->bus_priv->sdio_obj;
+	whd_result_t ret;
+	struct sd_card *sd = whd_driver->bus_priv->sdio_obj;
 	sdio_cmd_argument_t arg = {0};
 
 	if (direction == BUS_WRITE) {
@@ -266,7 +269,7 @@ whd_result_t whd_bus_sdio_cmd53(whd_driver_t whd_driver, whd_bus_transfer_direct
 
 	if (mode == SDIO_BYTE_MODE) {
 		__ASSERT(data_size <= (uint16_t)512,
-			 '"%s...": whd_bus_sdio_cmd53: data_size > 512 for byte mode', __func__);
+			 "%s: data_size > 512 for byte mode", __func__);
 		arg.cmd53.count = (uint32_t)(data_size & 0x1FF);
 
 	} else {
@@ -289,16 +292,16 @@ whd_result_t whd_bus_sdio_cmd53(whd_driver_t whd_driver, whd_bus_transfer_direct
 		.block_size = (mode == SDIO_BYTE_MODE) ? data_size : SDIO_64B_BLOCK,
 		.blocks = (mode == SDIO_BYTE_MODE) ? 1 : arg.cmd53.count,
 	};
-	result = sdhc_request(sd->sdhc, &sdhc_cmd, &sdhc_data);
+	ret = sdhc_request(sd->sdhc, &sdhc_cmd, &sdhc_data);
 
 	WHD_BUS_STATS_CONDITIONAL_INCREMENT_VARIABLE(
-		whd_driver->bus_priv, ((result != WHD_SUCCESS) && (direction == BUS_READ)),
+		whd_driver->bus_priv, ((ret != WHD_SUCCESS) && (direction == BUS_READ)),
 		cmd53_read_fail);
 	WHD_BUS_STATS_CONDITIONAL_INCREMENT_VARIABLE(
-		whd_driver->bus_priv, ((result != WHD_SUCCESS) && (direction == BUS_WRITE)),
+		whd_driver->bus_priv, ((ret != WHD_SUCCESS) && (direction == BUS_WRITE)),
 		cmd53_write_fail);
 
-	CHECK_RETURN(result);
+	CHECK_RETURN(ret);
 	return WHD_SUCCESS;
 }
 
@@ -326,17 +329,17 @@ whd_result_t whd_bus_sdio_irq_register(whd_driver_t whd_driver)
 
 whd_result_t whd_bus_sdio_irq_enable(whd_driver_t whd_driver, whd_bool_t enable)
 {
-	int result;
+	int ret;
 	struct sd_card *sd = (struct sd_card *)whd_driver->bus_priv->sdio_obj;
 
 	/* Enable/disable SDIO Card interrupts */
 	if (enable) {
-		result = sdhc_enable_interrupt(sd->sdhc, whd_bus_sdio_irq_handler, SDHC_INT_SDIO,
+		ret = sdhc_enable_interrupt(sd->sdhc, whd_bus_sdio_irq_handler, SDHC_INT_SDIO,
 				      whd_driver);
 	} else {
-		result = sdhc_disable_interrupt(sd->sdhc, SDHC_INT_SDIO);
+		ret = sdhc_disable_interrupt(sd->sdhc, SDHC_INT_SDIO);
 	}
-	return result;
+	return ret;
 }
 
 /*
@@ -373,7 +376,7 @@ void whd_bus_sdio_oob_irq_handler(const struct device *port, struct gpio_callbac
 whd_result_t whd_bus_sdio_register_oob_intr(whd_driver_t whd_driver)
 {
 #if DT_INST_NODE_HAS_PROP(0, wifi_host_wake_gpios)
-	int result;
+	int ret;
 	const struct device *dev = DEVICE_DT_GET(DT_DRV_INST(0));
 	struct airoc_wifi_data *data = dev->data;
 
@@ -388,11 +391,11 @@ whd_result_t whd_bus_sdio_register_oob_intr(whd_driver_t whd_driver)
 	}
 
 	/* Configure OOB pin as output */
-	result = gpio_pin_configure_dt(host_oob_pin, GPIO_INPUT);
-	if (result != 0) {
+	ret = gpio_pin_configure_dt(host_oob_pin, GPIO_INPUT);
+	if (ret != 0) {
 		WPRINT_WHD_ERROR((
 			" %s: Failed at gpio_pin_configure_dt for host_oob_pin, result code = %d\n",
-			__func__, result));
+			__func__, ret));
 		return WHD_HAL_ERROR;
 	}
 
@@ -400,11 +403,11 @@ whd_result_t whd_bus_sdio_register_oob_intr(whd_driver_t whd_driver)
 	gpio_init_callback(&data->host_oob_pin_cb, whd_bus_sdio_oob_irq_handler,
 			   BIT(host_oob_pin->pin));
 
-	result = gpio_add_callback_dt(host_oob_pin, &data->host_oob_pin_cb);
-	if (result != 0) {
+	ret = gpio_add_callback_dt(host_oob_pin, &data->host_oob_pin_cb);
+	if (ret != 0) {
 		WPRINT_WHD_ERROR(
 			("%s: Failed at gpio_add_callback_dt for host_oob_pin, result code = %d\n",
-			 __func__, result));
+			 __func__, ret));
 		return WHD_HAL_ERROR;
 	}
 #endif /* DT_INST_NODE_HAS_PROP(0, wifi_host_wake_gpios) */
@@ -415,15 +418,15 @@ whd_result_t whd_bus_sdio_register_oob_intr(whd_driver_t whd_driver)
 whd_result_t whd_bus_sdio_unregister_oob_intr(whd_driver_t whd_driver)
 {
 #if DT_INST_NODE_HAS_PROP(0, wifi_host_wake_gpios)
-	int result;
+	int ret;
 	const whd_oob_config_t *oob_config = &whd_driver->bus_priv->sdio_config.oob_config;
 
 	/* Disable OOB pin interrupts */
-	result = gpio_pin_interrupt_configure_dt(oob_config->host_oob_pin, GPIO_INT_DISABLE);
-	if (result != 0) {
+	ret = gpio_pin_interrupt_configure_dt(oob_config->host_oob_pin, GPIO_INT_DISABLE);
+	if (ret != 0) {
 		WPRINT_WHD_ERROR(("%s: Failed at gpio_pin_interrupt_configure_dt for host_oob_pin, "
 				  "result code = %d\n",
-				  __func__, result));
+				  __func__, ret));
 		return WHD_HAL_ERROR;
 	}
 #endif /* DT_INST_NODE_HAS_PROP(0, wifi_host_wake_gpios) */
@@ -433,18 +436,18 @@ whd_result_t whd_bus_sdio_unregister_oob_intr(whd_driver_t whd_driver)
 whd_result_t whd_bus_sdio_enable_oob_intr(whd_driver_t whd_driver, whd_bool_t enable)
 {
 #if DT_INST_NODE_HAS_PROP(0, wifi_host_wake_gpios)
-	int result;
+	int ret;
 	const whd_oob_config_t *oob_config = &whd_driver->bus_priv->sdio_config.oob_config;
 	uint32_t trig_conf =
 		(oob_config->is_falling_edge == WHD_TRUE) ? GPIO_INT_TRIG_LOW : GPIO_INT_TRIG_HIGH;
 
 	/* Enable OOB pin interrupts */
-	result = gpio_pin_interrupt_configure_dt(oob_config->host_oob_pin,
+	ret = gpio_pin_interrupt_configure_dt(oob_config->host_oob_pin,
 						 GPIO_INT_ENABLE | GPIO_INT_EDGE | trig_conf);
-	if (result != 0) {
+	if (ret != 0) {
 		WPRINT_WHD_ERROR(("%s: Failed at gpio_pin_interrupt_configure_dt for host_oob_pin, "
 				  "result code = %d\n",
-				  __func__, result));
+				  __func__, ret));
 		return WHD_HAL_ERROR;
 	}
 #endif /* DT_INST_NODE_HAS_PROP(0, wifi_host_wake_gpios) */

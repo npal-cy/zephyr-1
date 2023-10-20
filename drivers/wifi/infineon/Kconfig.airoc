@@ -22,6 +22,9 @@ config SHELL_STACK_SIZE
 	default 4096
 endif # SHELL
 
+config SYSTEM_WORKQUEUE_STACK_SIZE
+	default 4096
+
 config AIROC_WIFI_EVENT_TASK_STACK_SIZE
 	int "Event Task Stack Size"
 	default 4096
