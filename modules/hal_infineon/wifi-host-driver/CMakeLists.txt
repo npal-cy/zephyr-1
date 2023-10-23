@@ -110,11 +110,11 @@ if(CONFIG_CYW43439 AND NOT CONFIG_AIROC_WIFI_CUSTOM)
 
   # firmware
   if(CONFIG_AIROC_WLAN_MFG_FIRMWARE)
-    set(cyw43xx_fw_bin     ${hal_blobs_dir}/firmware/COMPONENT_43439/43439a0-mfgtest.bin)
-    zephyr_library_sources(${hal_wifi_dir_resources}/firmware/COMPONENT_43439/43439a0-mfgtest_bin.c)
+    set(cyw43xx_fw_bin     ${hal_blobs_dir}/firmware/COMPONENT_43439/43439A0-mfgtest.bin)
+    zephyr_library_sources(${hal_wifi_dir_resources}/firmware/COMPONENT_43439/43439A0-mfgtest_bin.c)
   else()
-    set(cyw43xx_fw_bin     ${hal_blobs_dir}/firmware/COMPONENT_43439/43439a0.bin)
-    zephyr_library_sources(${hal_wifi_dir_resources}/firmware/COMPONENT_43439/43439a0_bin.c)
+    set(cyw43xx_fw_bin     ${hal_blobs_dir}/firmware/COMPONENT_43439/43439A0.bin)
+    zephyr_library_sources(${hal_wifi_dir_resources}/firmware/COMPONENT_43439/43439A0_bin.c)
   endif()
 endif()
 
@@ -175,11 +175,11 @@ if(CONFIG_CYW43439_MURATA_1YN AND NOT CONFIG_AIROC_WIFI_CUSTOM)
 
   # clm
   if(CONFIG_AIROC_WLAN_MFG_FIRMWARE)
-    set(cyw43xx_clm_bin    ${hal_blobs_dir}/clm/COMPONENT_43439/43439a0-mfgtest.clm_blob)
-    zephyr_library_sources(${hal_wifi_dir_resources}/clm/COMPONENT_43439/43439a0-mfgtest_clm_blob.c)
+    set(cyw43xx_clm_bin    ${hal_blobs_dir}/clm/COMPONENT_43439/43439A0-mfgtest.clm_blob)
+    zephyr_library_sources(${hal_wifi_dir_resources}/clm/COMPONENT_43439/43439A0-mfgtest_clm_blob.c)
   else()
-    set(cyw43xx_clm_bin    ${hal_blobs_dir}/clm/COMPONENT_43439/43439a0.clm_blob)
-    zephyr_library_sources(${hal_wifi_dir_resources}/clm/COMPONENT_43439/43439a0_clm_blob.c)
+    set(cyw43xx_clm_bin    ${hal_blobs_dir}/clm/COMPONENT_43439/43439A0.clm_blob)
+    zephyr_library_sources(${hal_wifi_dir_resources}/clm/COMPONENT_43439/43439A0_clm_blob.c)
   endif()
 
   # nvram

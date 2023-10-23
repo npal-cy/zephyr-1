@@ -168,8 +168,7 @@ manifest:
       groups:
         - hal
     - name: hal_infineon
-      url: https://github.com/npal-cy/hal_infineon-1
-      revision: topic/update_WHD
+      revision: pull/13/head
       path: modules/hal/infineon
       groups:
         - hal
