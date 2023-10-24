@@ -295,7 +295,7 @@ whd_result_t whd_bus_sdio_irq_register(whd_driver_t whd_driver)
 whd_result_t whd_bus_sdio_irq_enable(whd_driver_t whd_driver, whd_bool_t enable)
 {
 	int ret;
-	struct sd_card *sd = (struct sd_card *)whd_driver->bus_priv->sdio_obj;
+	struct sd_card *sd = whd_driver->bus_priv->sdio_obj;
 
 	/* Enable/disable SDIO Card interrupts */
 	if (enable) {
