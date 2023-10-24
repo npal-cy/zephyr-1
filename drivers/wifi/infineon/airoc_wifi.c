@@ -51,10 +51,26 @@ LOG_MODULE_REGISTER(infineon_airoc_wifi, CONFIG_WIFI_LOG_LEVEL);
 
 #define AIROC_WIFI_WAIT_SEMA_MS    (30 * 1000)
 #define AIROC_WIFI_SCAN_TIMEOUT_MS (12 * 1000)
+
+/* AIROC private functions */
+static whd_result_t airoc_wifi_host_buffer_get(whd_buffer_t *buffer, whd_buffer_dir_t direction,
+					       uint16_t size, uint32_t timeout_ms);
+static void airoc_wifi_buffer_release(whd_buffer_t buffer, whd_buffer_dir_t direction);
+static uint8_t *airoc_wifi_buffer_get_current_piece_data_pointer(whd_buffer_t buffer);
+static uint16_t airoc_wifi_buffer_get_current_piece_size(whd_buffer_t buffer);
+static whd_result_t airoc_wifi_buffer_set_size(whd_buffer_t buffer, unsigned short size);
+static whd_result_t airoc_wifi_buffer_add_remove_at_front(whd_buffer_t *buffer,
+							  int32_t add_remove_amount);
+static void airoc_wifi_network_process_ethernet_data(whd_interface_t interface,
+						     whd_buffer_t buffer);
+int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface,
+			    whd_netif_funcs_t *netif_funcs, whd_buffer_funcs_t *buffer_if);
+
 /* Allocate network pool */
 NET_BUF_POOL_FIXED_DEFINE_ALIGN(airoc_pool, AIROC_WIFI_PACKET_POOL_COUNT,
 				AIROC_WIFI_PACKET_POOL_SIZE, 0, NULL);
 
+/* AIROC globals */
 static uint16_t ap_event_handler_index = 0xFF;
 
 /* Use global iface pointer to support any Ethernet driver */
@@ -84,6 +100,20 @@ static struct airoc_wifi_config airoc_wifi_config = {
 	.wifi_dev_wake_gpio = GPIO_DT_SPEC_GET_OR(DT_DRV_INST(0), wifi_dev_wake_gpios, {0}),
 };
 
+static whd_buffer_funcs_t airoc_wifi_buffer_if_default = {
+	.whd_host_buffer_get = airoc_wifi_host_buffer_get,
+	.whd_buffer_release = airoc_wifi_buffer_release,
+	.whd_buffer_get_current_piece_data_pointer =
+		airoc_wifi_buffer_get_current_piece_data_pointer,
+	.whd_buffer_get_current_piece_size = airoc_wifi_buffer_get_current_piece_size,
+	.whd_buffer_set_size = airoc_wifi_buffer_set_size,
+	.whd_buffer_add_remove_at_front = airoc_wifi_buffer_add_remove_at_front,
+};
+
+static whd_netif_funcs_t airoc_wifi_netif_if_default = {
+	.whd_network_process_ethernet_data = airoc_wifi_network_process_ethernet_data,
+};
+
 K_MSGQ_DEFINE(airoc_wifi_msgq, sizeof(whd_event_header_t), 10, 4);
 K_THREAD_STACK_DEFINE(airoc_wifi_event_stack, CONFIG_AIROC_WIFI_EVENT_TASK_STACK_SIZE);
 static struct k_thread airoc_wifi_event_thread;
@@ -93,236 +123,16 @@ struct airoc_wifi_event_t {
 	uint32_t event_type;
 };
 
+/*
+ * AIROC Wi-Fi helper functions
+ */
 whd_interface_t airoc_wifi_get_whd_interface(void)
 {
 	return airoc_if;
 }
 
-/*
- * Implement WHD network buffers functions
- */
-whd_result_t cy_host_buffer_get(whd_buffer_t *buffer, whd_buffer_dir_t direction, uint16_t size,
-				uint32_t timeout_ms)
-{
-	ARG_UNUSED(direction);
-	ARG_UNUSED(timeout_ms);
-	struct net_buf *buf;
-
-	buf = net_buf_alloc_len(&airoc_pool, size, K_NO_WAIT);
-	if (buf == NULL) {
-		return WHD_BUFFER_ALLOC_FAIL;
-	}
-	*buffer = buf;
-	return WHD_SUCCESS;
-}
-
-void cy_buffer_release(whd_buffer_t buffer, whd_buffer_dir_t direction)
-{
-	CY_UNUSED_PARAMETER(direction);
-	(void)net_buf_destroy((struct net_buf *)buffer);
-}
-
-uint8_t *cy_buffer_get_current_piece_data_pointer(whd_buffer_t buffer)
-{
-	CY_ASSERT(buffer != NULL);
-	struct net_buf *buf = (struct net_buf *)buffer;
-
-	return (uint8_t *)buf->data;
-}
-
-uint16_t cy_buffer_get_current_piece_size(whd_buffer_t buffer)
-{
-	CY_ASSERT(buffer != NULL);
-	struct net_buf *buf = (struct net_buf *)buffer;
-
-	return (uint16_t)buf->size;
-}
-
-whd_result_t cy_buffer_set_size(whd_buffer_t buffer, unsigned short size)
-{
-	CY_ASSERT(buffer != NULL);
-	struct net_buf *buf = (struct net_buf *)buffer;
-
-	buf->size = size;
-	return CY_RSLT_SUCCESS;
-}
-
-whd_result_t cy_buffer_add_remove_at_front(whd_buffer_t *buffer, int32_t add_remove_amount)
-{
-	CY_ASSERT(buffer != NULL);
-	struct net_buf **buf = (struct net_buf **)buffer;
-
-	if (add_remove_amount > 0) {
-		(*buf)->len = (*buf)->size;
-		(*buf)->data = net_buf_pull(*buf, add_remove_amount);
-	} else {
-		(*buf)->data = net_buf_push(*buf, -add_remove_amount);
-		(*buf)->len = (*buf)->size;
-	}
-	return WHD_SUCCESS;
-}
-
-static int airoc_mgmt_send(const struct device *dev, struct net_pkt *pkt)
-{
-	struct airoc_wifi_data *data = dev->data;
-	cy_rslt_t ret;
-	size_t pkt_len = net_pkt_get_len(pkt);
-	struct net_buf *buf = NULL;
-
-	/* Read the packet payload */
-	if (net_pkt_read(pkt, data->frame_buf, pkt_len) < 0) {
-		LOG_ERR("net_pkt_read failed");
-		return -EIO;
-	}
-
-	/* Allocate Network Buffer from pool with Packet Length + Data Header */
-	buf = net_buf_alloc_len(&airoc_pool, pkt_len + sizeof(data_header_t), K_NO_WAIT);
-	if (buf == NULL) {
-		return -EIO;
-	}
-
-	/* Reserve the buffer Headroom for WHD Data header */
-	net_buf_reserve(buf, sizeof(data_header_t));
-
-	/* Copy the buffer to network Buffer pointer */
-	(void)memcpy(buf->data, data->frame_buf, pkt_len);
-
-	/* Call WHD API to send out the Packet */
-	ret = whd_network_send_ethernet_data(airoc_if, (void *)buf);
-	if (ret != CY_RSLT_SUCCESS) {
-		LOG_ERR("whd_network_send_ethernet_data failed");
-#if defined(CONFIG_NET_STATISTICS_WIFI)
-		data->stats.errors.tx++;
-#endif
-		return -EIO;
-	}
-
-#if defined(CONFIG_NET_STATISTICS_WIFI)
-	data->stats.bytes.sent += pkt_len;
-	data->stats.pkts.tx++;
-#endif
-
-	return 0;
-}
-
-void cy_network_process_ethernet_data(whd_interface_t interface, whd_buffer_t buffer)
-{
-	struct net_pkt *pkt;
-	uint8_t *data = whd_buffer_get_current_piece_data_pointer(interface->whd_driver, buffer);
-	uint32_t len = whd_buffer_get_current_piece_size(interface->whd_driver, buffer);
-	bool net_pkt_unref_flag = false;
-
-	if ((airoc_wifi_iface != NULL) && net_if_flag_is_set(airoc_wifi_iface, NET_IF_UP)) {
-
-		pkt = net_pkt_rx_alloc_with_buffer(airoc_wifi_iface, len, AF_UNSPEC, 0, K_NO_WAIT);
-
-		if (pkt != NULL) {
-			if (net_pkt_write(pkt, data, len) < 0) {
-				LOG_ERR("Failed to write pkt");
-				net_pkt_unref_flag = true;
-			}
-
-			if ((net_pkt_unref_flag) || (net_recv_data(airoc_wifi_iface, pkt) < 0)) {
-				LOG_ERR("Failed to push received data");
-				net_pkt_unref_flag = true;
-			}
-		} else {
-			LOG_ERR("Failed to get net buffer");
-		}
-	}
-
-	/* Release a packet buffer */
-	cy_buffer_release(buffer, WHD_NETWORK_RX);
-
-#if defined(CONFIG_NET_STATISTICS_WIFI)
-	airoc_wifi_data.stats.bytes.received += len;
-	airoc_wifi_data.stats.pkts.rx++;
-#endif
-
-	if (net_pkt_unref_flag) {
-		net_pkt_unref(pkt);
-#if defined(CONFIG_NET_STATISTICS_WIFI)
-		airoc_wifi_data.stats.errors.rx++;
-#endif
-	}
-}
-
-static void *link_events_handler(whd_interface_t ifp, const whd_event_header_t *event_header,
-				 const uint8_t *event_data, void *handler_user_data)
-{
-	ARG_UNUSED(ifp);
-	ARG_UNUSED(event_data);
-	ARG_UNUSED(handler_user_data);
-
-	k_msgq_put(&airoc_wifi_msgq, event_header, K_FOREVER);
-	return NULL;
-}
-
-static void airoc_event_task(void)
-{
-	whd_event_header_t event_header;
-
-	while (1) {
-		k_msgq_get(&airoc_wifi_msgq, &event_header, K_FOREVER);
-
-		switch ((whd_event_num_t)event_header.event_type) {
-		case WLC_E_LINK:
-			break;
-
-		case WLC_E_DEAUTH_IND:
-		case WLC_E_DISASSOC_IND:
-			net_if_dormant_on(airoc_wifi_iface);
-			break;
-
-		default:
-			break;
-		}
-	}
-}
-
-static void airoc_mgmt_init(struct net_if *iface)
-{
-	const struct device *dev = net_if_get_device(iface);
-	struct airoc_wifi_data *data = dev->data;
-	struct ethernet_context *eth_ctx = net_if_l2_data(iface);
-
-	eth_ctx->eth_if_type = L2_ETH_IF_TYPE_WIFI;
-	data->iface = iface;
-	airoc_wifi_iface = iface;
-
-	/* Read WLAN MAC Address */
-	if (whd_wifi_get_mac_address(airoc_sta_if, &airoc_sta_if->mac_addr) != WHD_SUCCESS) {
-		LOG_ERR("Failed to get mac address");
-	} else {
-		(void)memcpy(&data->mac_addr, &airoc_sta_if->mac_addr,
-			     sizeof(airoc_sta_if->mac_addr));
-	}
-
-	/* Assign link local address. */
-	if (net_if_set_link_addr(iface, data->mac_addr, 6, NET_LINK_ETHERNET)) {
-		LOG_ERR("Failed to set link addr");
-	}
-
-	/* Initialize Ethernet L2 stack */
-	ethernet_init(iface);
-
-	/* Not currently connected to a network */
-	net_if_dormant_on(iface);
-
-	/* L1 network layer (physical layer) is up */
-	net_if_carrier_on(data->iface);
-}
-
-whd_result_t cy_buffer_pool_init(void *tx_packet_pool, void *rx_packet_pool)
-{
-	CY_UNUSED_PARAMETER(tx_packet_pool);
-	CY_UNUSED_PARAMETER(rx_packet_pool);
-
-	return 0;
-}
-
-static void scan_cb_search(whd_scan_result_t **result_ptr, void *user_data,
-			   whd_scan_status_t status)
+static void airoc_wifi_scan_cb_search(whd_scan_result_t **result_ptr, void *user_data,
+				      whd_scan_status_t status)
 {
 	if (status == WHD_SCAN_ABORTED) {
 		k_sem_give(&airoc_wifi_data.sema_scan);
@@ -416,6 +226,230 @@ static void scan_callback(whd_scan_result_t **result_ptr, void *user_data, whd_s
 	memset(*result_ptr, 0, sizeof(whd_scan_result_t));
 }
 
+/*
+ * Implement WHD network buffers functions
+ */
+static whd_result_t airoc_wifi_host_buffer_get(whd_buffer_t *buffer, whd_buffer_dir_t direction,
+					       uint16_t size, uint32_t timeout_ms)
+{
+	ARG_UNUSED(direction);
+	ARG_UNUSED(timeout_ms);
+	struct net_buf *buf;
+
+	buf = net_buf_alloc_len(&airoc_pool, size, K_NO_WAIT);
+	if (buf == NULL) {
+		return WHD_BUFFER_ALLOC_FAIL;
+	}
+	*buffer = buf;
+	return WHD_SUCCESS;
+}
+
+static void airoc_wifi_buffer_release(whd_buffer_t buffer, whd_buffer_dir_t direction)
+{
+	CY_UNUSED_PARAMETER(direction);
+	(void)net_buf_destroy((struct net_buf *)buffer);
+}
+
+static uint8_t *airoc_wifi_buffer_get_current_piece_data_pointer(whd_buffer_t buffer)
+{
+	CY_ASSERT(buffer != NULL);
+	struct net_buf *buf = (struct net_buf *)buffer;
+
+	return (uint8_t *)buf->data;
+}
+
+static uint16_t airoc_wifi_buffer_get_current_piece_size(whd_buffer_t buffer)
+{
+	CY_ASSERT(buffer != NULL);
+	struct net_buf *buf = (struct net_buf *)buffer;
+
+	return (uint16_t)buf->size;
+}
+
+static whd_result_t airoc_wifi_buffer_set_size(whd_buffer_t buffer, unsigned short size)
+{
+	CY_ASSERT(buffer != NULL);
+	struct net_buf *buf = (struct net_buf *)buffer;
+
+	buf->size = size;
+	return CY_RSLT_SUCCESS;
+}
+
+static whd_result_t airoc_wifi_buffer_add_remove_at_front(whd_buffer_t *buffer,
+							  int32_t add_remove_amount)
+{
+	CY_ASSERT(buffer != NULL);
+	struct net_buf **buf = (struct net_buf **)buffer;
+
+	if (add_remove_amount > 0) {
+		(*buf)->len = (*buf)->size;
+		(*buf)->data = net_buf_pull(*buf, add_remove_amount);
+	} else {
+		(*buf)->data = net_buf_push(*buf, -add_remove_amount);
+		(*buf)->len = (*buf)->size;
+	}
+	return WHD_SUCCESS;
+}
+
+static int airoc_mgmt_send(const struct device *dev, struct net_pkt *pkt)
+{
+	struct airoc_wifi_data *data = dev->data;
+	cy_rslt_t ret;
+	size_t pkt_len = net_pkt_get_len(pkt);
+	struct net_buf *buf = NULL;
+
+	/* Read the packet payload */
+	if (net_pkt_read(pkt, data->frame_buf, pkt_len) < 0) {
+		LOG_ERR("net_pkt_read failed");
+		return -EIO;
+	}
+
+	/* Allocate Network Buffer from pool with Packet Length + Data Header */
+	buf = net_buf_alloc_len(&airoc_pool, pkt_len + sizeof(data_header_t), K_NO_WAIT);
+	if (buf == NULL) {
+		return -EIO;
+	}
+
+	/* Reserve the buffer Headroom for WHD Data header */
+	net_buf_reserve(buf, sizeof(data_header_t));
+
+	/* Copy the buffer to network Buffer pointer */
+	(void)memcpy(buf->data, data->frame_buf, pkt_len);
+
+	/* Call WHD API to send out the Packet */
+	ret = whd_network_send_ethernet_data(airoc_if, (void *)buf);
+	if (ret != CY_RSLT_SUCCESS) {
+		LOG_ERR("whd_network_send_ethernet_data failed");
+#if defined(CONFIG_NET_STATISTICS_WIFI)
+		data->stats.errors.tx++;
+#endif
+		return -EIO;
+	}
+
+#if defined(CONFIG_NET_STATISTICS_WIFI)
+	data->stats.bytes.sent += pkt_len;
+	data->stats.pkts.tx++;
+#endif
+
+	return 0;
+}
+
+static void airoc_wifi_network_process_ethernet_data(whd_interface_t interface, whd_buffer_t buffer)
+{
+	struct net_pkt *pkt;
+	uint8_t *data = whd_buffer_get_current_piece_data_pointer(interface->whd_driver, buffer);
+	uint32_t len = whd_buffer_get_current_piece_size(interface->whd_driver, buffer);
+	bool net_pkt_unref_flag = false;
+
+	if ((airoc_wifi_iface != NULL) && net_if_flag_is_set(airoc_wifi_iface, NET_IF_UP)) {
+
+		pkt = net_pkt_rx_alloc_with_buffer(airoc_wifi_iface, len, AF_UNSPEC, 0, K_NO_WAIT);
+
+		if (pkt != NULL) {
+			if (net_pkt_write(pkt, data, len) < 0) {
+				LOG_ERR("Failed to write pkt");
+				net_pkt_unref_flag = true;
+			}
+
+			if ((net_pkt_unref_flag) || (net_recv_data(airoc_wifi_iface, pkt) < 0)) {
+				LOG_ERR("Failed to push received data");
+				net_pkt_unref_flag = true;
+			}
+		} else {
+			LOG_ERR("Failed to get net buffer");
+		}
+	}
+
+	/* Release a packet buffer */
+	airoc_wifi_buffer_release(buffer, WHD_NETWORK_RX);
+
+#if defined(CONFIG_NET_STATISTICS_WIFI)
+	airoc_wifi_data.stats.bytes.received += len;
+	airoc_wifi_data.stats.pkts.rx++;
+#endif
+
+	if (net_pkt_unref_flag) {
+		net_pkt_unref(pkt);
+#if defined(CONFIG_NET_STATISTICS_WIFI)
+		airoc_wifi_data.stats.errors.rx++;
+#endif
+	}
+}
+
+static void *link_events_handler(whd_interface_t ifp, const whd_event_header_t *event_header,
+				 const uint8_t *event_data, void *handler_user_data)
+{
+	ARG_UNUSED(ifp);
+	ARG_UNUSED(event_data);
+	ARG_UNUSED(handler_user_data);
+
+	k_msgq_put(&airoc_wifi_msgq, event_header, K_FOREVER);
+	return NULL;
+}
+
+static void airoc_event_task(void)
+{
+	whd_event_header_t event_header;
+
+	while (1) {
+		k_msgq_get(&airoc_wifi_msgq, &event_header, K_FOREVER);
+
+		switch ((whd_event_num_t)event_header.event_type) {
+		case WLC_E_LINK:
+			break;
+
+		case WLC_E_DEAUTH_IND:
+		case WLC_E_DISASSOC_IND:
+			net_if_dormant_on(airoc_wifi_iface);
+			break;
+
+		default:
+			break;
+		}
+	}
+}
+
+static void airoc_mgmt_init(struct net_if *iface)
+{
+	const struct device *dev = net_if_get_device(iface);
+	struct airoc_wifi_data *data = dev->data;
+	struct ethernet_context *eth_ctx = net_if_l2_data(iface);
+
+	eth_ctx->eth_if_type = L2_ETH_IF_TYPE_WIFI;
+	data->iface = iface;
+	airoc_wifi_iface = iface;
+
+	/* Read WLAN MAC Address */
+	if (whd_wifi_get_mac_address(airoc_sta_if, &airoc_sta_if->mac_addr) != WHD_SUCCESS) {
+		LOG_ERR("Failed to get mac address");
+	} else {
+		(void)memcpy(&data->mac_addr, &airoc_sta_if->mac_addr,
+			     sizeof(airoc_sta_if->mac_addr));
+	}
+
+	/* Assign link local address. */
+	if (net_if_set_link_addr(iface, data->mac_addr, 6, NET_LINK_ETHERNET)) {
+		LOG_ERR("Failed to set link addr");
+	}
+
+	/* Initialize Ethernet L2 stack */
+	ethernet_init(iface);
+
+	/* Not currently connected to a network */
+	net_if_dormant_on(iface);
+
+	/* L1 network layer (physical layer) is up */
+	net_if_carrier_on(data->iface);
+}
+
+whd_result_t cy_buffer_pool_init(void *tx_packet_pool, void *rx_packet_pool)
+{
+	CY_UNUSED_PARAMETER(tx_packet_pool);
+	CY_UNUSED_PARAMETER(rx_packet_pool);
+
+	return 0;
+}
+
 static int airoc_mgmt_scan(const struct device *dev, struct wifi_scan_params *params,
 			   scan_result_cb_t cb)
 {
@@ -476,7 +510,8 @@ static int airoc_mgmt_connect(const struct device *dev, struct wifi_connect_req_
 	memcpy(usr_result.SSID.value, ssid.value, ssid.length);
 
 	if (whd_wifi_scan(airoc_sta_if, WHD_SCAN_TYPE_ACTIVE, WHD_BSS_TYPE_ANY, NULL, NULL, NULL,
-			  NULL, scan_cb_search, &scan_result, &(usr_result)) != WHD_SUCCESS) {
+			  NULL, airoc_wifi_scan_cb_search, &scan_result,
+			  &(usr_result)) != WHD_SUCCESS) {
 		LOG_ERR("Failed start scan");
 		ret = -EAGAIN;
 		goto error;
@@ -507,11 +542,11 @@ error:
 	if (ret < 0) {
 		net_if_dormant_on(data->iface);
 	} else {
+		net_if_dormant_off(data->iface);
+		data->is_sta_connected = true;
 #if defined(CONFIG_NET_DHCPV4)
 		net_dhcpv4_restart(data->iface);
 #endif /* defined(CONFIG_NET_DHCPV4) */
-		net_if_dormant_off(data->iface);
-		data->is_sta_connected = true;
 	}
 
 	wifi_mgmt_raise_connect_result_event(data->iface, ret);
@@ -542,8 +577,9 @@ static int airoc_mgmt_disconnect(const struct device *dev)
 	return ret;
 }
 
-static void *ap_link_events_handler(whd_interface_t ifp, const whd_event_header_t *event_header,
-				    const uint8_t *event_data, void *handler_user_data)
+static void *airoc_wifi_ap_link_events_handler(whd_interface_t ifp,
+					       const whd_event_header_t *event_header,
+					       const uint8_t *event_data, void *handler_user_data)
 {
 	struct airoc_wifi_event_t airoc_event = {
 		.is_ap_event = 1,
@@ -568,8 +604,14 @@ static int airoc_mgmt_ap_enable(const struct device *dev, struct wifi_connect_re
 	}
 
 	if (data->is_sta_connected) {
-		LOG_ERR("Network interface is busy STA. Please first disconnect STA.");
+		LOG_ERR("Network interface is busy in STA mode. Please first disconnect STA.");
 		ret = -EBUSY;
+		goto error;
+	}
+
+	if (data->is_ap_up) {
+		LOG_ERR("Already AP is on - first disable");
+		ret = -EAGAIN;
 		goto error;
 	}
 
@@ -583,17 +625,11 @@ static int airoc_mgmt_ap_enable(const struct device *dev, struct wifi_connect_re
 		data->second_interface_init = true;
 	}
 
-	if (data->is_ap_up) {
-		LOG_ERR("Already AP is on - first disable");
-		ret = -EAGAIN;
-		goto error;
-	}
-
 	ssid.length = params->ssid_length;
 	memcpy(ssid.value, params->ssid, ssid.length);
 
 	/* make sure to set valid channels for 2G and 5G:
-	 * - 2G channels from1 to 11,
+	 * - 2G channels from 1 to 11,
 	 * - 5G channels from 36 to 165
 	 */
 	if (((params->channel > 0) && (params->channel < 12)) ||
@@ -601,6 +637,8 @@ static int airoc_mgmt_ap_enable(const struct device *dev, struct wifi_connect_re
 		channel = params->channel;
 	} else {
 		channel = 1;
+		LOG_WRN("Discard of setting unsupported channel: %u (will set 1)",
+			params->channel);
 	}
 
 	if (params->psk_length == 0) {
@@ -623,8 +661,9 @@ static int airoc_mgmt_ap_enable(const struct device *dev, struct wifi_connect_re
 	}
 
 	/* set event handler */
-	if (whd_management_set_event_handler(airoc_ap_if, ap_link_events, ap_link_events_handler,
-					     NULL, &ap_event_handler_index) != 0) {
+	if (whd_management_set_event_handler(airoc_ap_if, ap_link_events,
+					     airoc_wifi_ap_link_events_handler, NULL,
+					     &ap_event_handler_index) != 0) {
 		whd_wifi_stop_ap(airoc_ap_if);
 		ret = -EAGAIN;
 		goto error;
@@ -690,7 +729,6 @@ static int airoc_mgmt_ap_disable(const struct device *dev)
 	return 0;
 }
 
-extern int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface);
 static int airoc_init(const struct device *dev)
 {
 	int ret;
@@ -708,7 +746,8 @@ static int airoc_init(const struct device *dev)
 	}
 	k_thread_name_set(tid, "airoc_event");
 
-	whd_ret = airoc_wifi_init_primary(dev, &airoc_sta_if);
+	whd_ret = airoc_wifi_init_primary(dev, &airoc_sta_if, &airoc_wifi_netif_if_default,
+					  &airoc_wifi_buffer_if_default);
 	if (whd_ret != CY_RSLT_SUCCESS) {
 		LOG_ERR("airoc_wifi_init_primary failed ret = %d \r\n", whd_ret);
 		return -EAGAIN;

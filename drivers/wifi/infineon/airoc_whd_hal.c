@@ -95,18 +95,6 @@ static whd_init_config_t init_config_default = {
 	.country = CY_WIFI_COUNTRY
 };
 
-static whd_buffer_funcs_t buffer_if_default = {
-	.whd_host_buffer_get = cy_host_buffer_get,
-	.whd_buffer_release = cy_buffer_release,
-	.whd_buffer_get_current_piece_data_pointer = cy_buffer_get_current_piece_data_pointer,
-	.whd_buffer_get_current_piece_size = cy_buffer_get_current_piece_size,
-	.whd_buffer_set_size = cy_buffer_set_size,
-	.whd_buffer_add_remove_at_front = cy_buffer_add_remove_at_front,
-};
-
-static whd_netif_funcs_t netif_if_default = {
-	.whd_network_process_ethernet_data = cy_network_process_ethernet_data,
-};
 
 /******************************************************
  *                 Function
@@ -151,7 +139,8 @@ int airoc_wifi_power_on(const struct device *dev)
 	return 0;
 }
 
-int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface)
+int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface,
+			    whd_netif_funcs_t *netif_funcs, whd_buffer_funcs_t *buffer_if)
 {
 	int ret;
 	struct airoc_wifi_data *data = dev->data;
@@ -187,11 +176,11 @@ int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface
 		return ret;
 	}
 
-	cy_rslt_t whd_ret = whd_init(&data->whd_drv, &init_config_default, &resource_ops,
-				    &buffer_if_default, &netif_if_default);
+	cy_rslt_t whd_ret = whd_init(&data->whd_drv, &init_config_default, &resource_ops, buffer_if,
+				     netif_funcs);
 	if (whd_ret == CY_RSLT_SUCCESS) {
 		whd_ret = whd_bus_sdio_attach(data->whd_drv, &whd_sdio_config,
-					     (whd_sdio_t)&data->card);
+					      (whd_sdio_t)&data->card);
 
 		if (whd_ret == CY_RSLT_SUCCESS) {
 			whd_ret = whd_wifi_on(data->whd_drv, interface);
@@ -268,8 +257,7 @@ whd_result_t whd_bus_sdio_cmd53(whd_driver_t whd_driver, whd_bus_transfer_direct
 	arg.cmd53.rw_flag = (uint32_t)((direction == BUS_WRITE) ? 1 : 0);
 
 	if (mode == SDIO_BYTE_MODE) {
-		__ASSERT(data_size <= (uint16_t)512,
-			 "%s: data_size > 512 for byte mode", __func__);
+		__ASSERT(data_size <= (uint16_t)512, "%s: data_size > 512 for byte mode", __func__);
 		arg.cmd53.count = (uint32_t)(data_size & 0x1FF);
 
 	} else {
@@ -335,7 +323,7 @@ whd_result_t whd_bus_sdio_irq_enable(whd_driver_t whd_driver, whd_bool_t enable)
 	/* Enable/disable SDIO Card interrupts */
 	if (enable) {
 		ret = sdhc_enable_interrupt(sd->sdhc, whd_bus_sdio_irq_handler, SDHC_INT_SDIO,
-				      whd_driver);
+					    whd_driver);
 	} else {
 		ret = sdhc_disable_interrupt(sd->sdhc, SDHC_INT_SDIO);
 	}
@@ -443,7 +431,7 @@ whd_result_t whd_bus_sdio_enable_oob_intr(whd_driver_t whd_driver, whd_bool_t en
 
 	/* Enable OOB pin interrupts */
 	ret = gpio_pin_interrupt_configure_dt(oob_config->host_oob_pin,
-						 GPIO_INT_ENABLE | GPIO_INT_EDGE | trig_conf);
+					      GPIO_INT_ENABLE | GPIO_INT_EDGE | trig_conf);
 	if (ret != 0) {
 		WPRINT_WHD_ERROR(("%s: Failed at gpio_pin_interrupt_configure_dt for host_oob_pin, "
 				  "result code = %d\n",
