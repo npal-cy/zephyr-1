@@ -16,7 +16,7 @@
 
 LOG_MODULE_REGISTER(infineon_airoc_wifi, CONFIG_WIFI_LOG_LEVEL);
 
-#ifndef AIROC_WIFI_TX_PACKET_POfOL_COUNT
+#ifndef AIROC_WIFI_TX_PACKET_POOL_COUNT
 #define AIROC_WIFI_TX_PACKET_POOL_COUNT (10)
 #endif
 
@@ -25,7 +25,7 @@ LOG_MODULE_REGISTER(infineon_airoc_wifi, CONFIG_WIFI_LOG_LEVEL);
 #endif
 
 #ifndef AIROC_WIFI_PACKET_POOL_SIZE
-#define AIROC_WIFI_PACKET_POOL_SIZE (1600)
+#define AIROC_WIFI_PACKET_POOL_SIZE     (1600)
 #endif
 
 #define AIROC_WIFI_PACKET_POOL_COUNT                                                               \

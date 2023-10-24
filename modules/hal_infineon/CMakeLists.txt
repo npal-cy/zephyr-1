@@ -38,7 +38,6 @@ endif()
 
 ## Add Wi-Fi assets for AIROC devices
 if (CONFIG_WIFI_AIROC)
-  add_subdirectory(whd-bsp-integration)
   add_subdirectory(wifi-host-driver)
 endif()
 

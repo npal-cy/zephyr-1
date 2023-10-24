@@ -5,29 +5,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr/net/ethernet.h>
-#include <zephyr/net/net_pkt.h>
-#include <zephyr/net/net_if.h>
-#include <zephyr/device.h>
-#include <soc.h>
-
-#include <zephyr/drivers/gpio.h>
-
-#include <zephyr/net/wifi_mgmt.h>
-#include <zephyr/net/net_offload.h>
-#include <zephyr/net/net_event.h>
-#include <zephyr/net/net_mgmt.h>
-
-#include <cy_network_buffer.h>
-#include <cyhal.h>
-#include <cyhal_sdhc.h>
-
-#include <whd_types.h>
-#include <whd_events_int.h>
 #include <whd_buffer_api.h>
-#include <cy_network_buffer.h>
-#include <cybsp_wifi.h>
 #include <zephyr/sd/sd.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/net/wifi_mgmt.h>
+#include <cyhal.h>
 
 struct airoc_wifi_data {
 	struct sd_card card;

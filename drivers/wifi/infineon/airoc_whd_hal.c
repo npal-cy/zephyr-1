@@ -7,32 +7,9 @@
 
 #include <airoc_wifi.h>
 
-#include <cyhal_gpio.h>
-#include <cyhal_sdio.h>
-#include <cyhal_sdhc.h>
-#include <cybsp_wifi.h>
-#include <cy_network_buffer.h>
-
-#include <zephyr/drivers/gpio.h>
-
 #include <bus_protocols/whd_bus_sdio_protocol.h>
 #include <bus_protocols/whd_bus.h>
-#include <bus_protocols/whd_bus_common.h>
-#include <bus_protocols/whd_chip_reg.h>
-#include <whd_chip_constants.h>
-#include <whd_int.h>
-#include <whd_chip.h>
-#include <whd_sdpcm.h>
-#include <whd_debug.h>
 #include <bus_protocols/whd_sdio.h>
-#include <whd_buffer_api.h>
-#include <whd_resource_if.h>
-#include <whd_types_int.h>
-#include <whd_types.h>
-
-#include <zephyr/sd/sd.h>
-#include <zephyr/sd/sdio.h>
-#include <zephyr/logging/log.h>
 
 #define DT_DRV_COMPAT infineon_airoc_wifi
 
