@@ -31,24 +31,6 @@ LOG_MODULE_REGISTER(infineon_airoc_wifi, CONFIG_WIFI_LOG_LEVEL);
 #define AIROC_WIFI_PACKET_POOL_COUNT                                                               \
 	(AIROC_WIFI_TX_PACKET_POOL_COUNT + AIROC_WIFI_RX_PACKET_POOL_COUNT)
 
-/* This macro is copy of NET_BUF_POOL_FIXED_DEFINE with aligning net_buf_data_##_name
- * WHD requires that network buffers is aligned, NET_BUF_POOL_FIXED_DEFINE does not
- * guarantees aligned.
- */
-#define NET_BUF_POOL_FIXED_DEFINE_ALIGN(_name, _count, _data_size, _ud_size, _destroy)             \
-	_NET_BUF_ARRAY_DEFINE(_name, _count, _ud_size);                                            \
-	static uint8_t __noinit net_buf_data_##_name[_count][_data_size] __net_buf_align;          \
-	static const struct net_buf_pool_fixed net_buf_fixed_##_name = {                           \
-		.data_size = _data_size,                                                           \
-		.data_pool = (uint8_t *)net_buf_data_##_name,                                      \
-	};                                                                                         \
-	static const struct net_buf_data_alloc net_buf_fixed_alloc_##_name = {                     \
-		.cb = &net_buf_fixed_cb,                                                           \
-		.alloc_data = (void *)&net_buf_fixed_##_name,                                      \
-	};                                                                                         \
-	static STRUCT_SECTION_ITERABLE(net_buf_pool, _name) = NET_BUF_POOL_INITIALIZER(            \
-		_name, &net_buf_fixed_alloc_##_name, _net_buf_##_name, _count, _ud_size, _destroy)
-
 #define AIROC_WIFI_WAIT_SEMA_MS    (30 * 1000)
 #define AIROC_WIFI_SCAN_TIMEOUT_MS (12 * 1000)
 
@@ -67,7 +49,7 @@ int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface
 			    whd_netif_funcs_t *netif_funcs, whd_buffer_funcs_t *buffer_if);
 
 /* Allocate network pool */
-NET_BUF_POOL_FIXED_DEFINE_ALIGN(airoc_pool, AIROC_WIFI_PACKET_POOL_COUNT,
+NET_BUF_POOL_FIXED_DEFINE(airoc_pool, AIROC_WIFI_PACKET_POOL_COUNT,
 				AIROC_WIFI_PACKET_POOL_SIZE, 0, NULL);
 
 /* AIROC globals */
@@ -440,14 +422,6 @@ static void airoc_mgmt_init(struct net_if *iface)
 
 	/* L1 network layer (physical layer) is up */
 	net_if_carrier_on(data->iface);
-}
-
-whd_result_t cy_buffer_pool_init(void *tx_packet_pool, void *rx_packet_pool)
-{
-	CY_UNUSED_PARAMETER(tx_packet_pool);
-	CY_UNUSED_PARAMETER(rx_packet_pool);
-
-	return 0;
 }
 
 static int airoc_mgmt_scan(const struct device *dev, struct wifi_scan_params *params,
