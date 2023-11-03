@@ -70,7 +70,6 @@ struct ifx_cat1_sdio_data {
 	cyhal_sdio_configurator_t cyhal_sdio_config;
 	enum sdhc_clock_speed clock_speed;
 	enum sdhc_bus_width bus_width;
-	struct k_mutex access_mutex;
 
 	void *sdio_cb_user_data;
 	sdhc_interrupt_cb_t sdio_cb;
@@ -162,11 +161,6 @@ static int ifx_cat1_sdio_request(const struct device *dev, struct sdhc_command *
 	struct ifx_cat1_sdio_data *dev_data = dev->data;
 	int ret;
 
-	/* Ensure we have exclusive access to SD card before sending request */
-	if (k_mutex_lock(&dev_data->access_mutex, K_MSEC(cmd->timeout_ms)) != 0) {
-		return -EBUSY;
-	}
-
 	switch (cmd->opcode) {
 	case CYHAL_SDIO_CMD_GO_IDLE_STATE:
 	case CYHAL_SDIO_CMD_SEND_RELATIVE_ADDR:
@@ -200,8 +194,6 @@ static int ifx_cat1_sdio_request(const struct device *dev, struct sdhc_command *
 		ret = -ENOTSUP;
 	}
 
-	/* Release access on card */
-	k_mutex_unlock(&dev_data->access_mutex);
 	return ret;
 }
 
@@ -307,12 +299,6 @@ static int ifx_cat1_sdio_init(const struct device *dev)
 
 	/* Register callback for SDIO events */
 	cyhal_sdio_register_callback(&data->sdio_obj, ifx_cat1_sdio_event_callback, (void *)dev);
-
-	ret = k_mutex_init(&data->access_mutex);
-	if (ret) {
-		cyhal_sdio_free(&data->sdio_obj);
-		return ret;
-	}
 
 	return 0;
 }

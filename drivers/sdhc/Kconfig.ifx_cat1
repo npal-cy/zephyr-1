@@ -13,3 +13,10 @@ config SDHC_INFINEON_CAT1
 	select SDHC_SUPPORTS_NATIVE_MODE
 	help
 	  This option enables the SDHC driver for Infineon CAT1 family.
+
+if SDHC_INFINEON_CAT1
+
+config SDHC_INIT_PRIORITY
+		default 70
+
+endif

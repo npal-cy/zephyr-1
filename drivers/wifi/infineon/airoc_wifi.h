@@ -7,12 +7,15 @@
 
 #include <whd_buffer_api.h>
 #include <zephyr/sd/sd.h>
+#include <zephyr/sd/sdio.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/net/wifi_mgmt.h>
 #include <cyhal.h>
 
 struct airoc_wifi_data {
 	struct sd_card card;
+	struct sdio_func sdio_func1;
+	struct sdio_func sdio_func2;
 	struct net_if *iface;
 	bool second_interface_init;
 	bool is_ap_up;

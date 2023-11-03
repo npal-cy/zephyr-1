@@ -10,6 +10,8 @@
 #include <bus_protocols/whd_bus_sdio_protocol.h>
 #include <bus_protocols/whd_bus.h>
 #include <bus_protocols/whd_sdio.h>
+#include <zephyr/sd/sd.h>
+
 
 #define DT_DRV_COMPAT infineon_airoc_wifi
 
@@ -71,7 +73,6 @@ static whd_init_config_t init_config_default = {
 	.thread_priority = (uint32_t)CY_WIFI_THREAD_PRIORITY,
 	.country = CY_WIFI_COUNTRY
 };
-
 
 /******************************************************
  *                 Function
@@ -153,6 +154,29 @@ int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface
 		return ret;
 	}
 
+	/* Init SDIO functions */
+	ret = sdio_init_func(&data->card, &data->sdio_func1, BACKPLANE_FUNCTION);
+	if (ret) {
+		LOG_ERR("sdio_enable_func BACKPLANE_FUNCTION, error: %x", ret);
+		return ret;
+	}
+	ret = sdio_init_func(&data->card, &data->sdio_func2, WLAN_FUNCTION);
+	if (ret) {
+		LOG_ERR("sdio_enable_func WLAN_FUNCTION, error: %x", ret);
+		return ret;
+	}
+	ret = sdio_set_block_size(&data->sdio_func1, SDIO_64B_BLOCK);
+	if (ret) {
+		LOG_ERR("Can't set block size for BACKPLANE_FUNCTION, error: %x", ret);	
+		return ret;
+	}
+	ret = sdio_set_block_size(&data->sdio_func2, SDIO_64B_BLOCK);
+	if (ret) {
+		LOG_ERR("Can't set block size for WLAN_FUNCTION, error: %x", ret);
+		return ret;
+	}
+	
+	/* Init wifi host driver (whd) */
 	cy_rslt_t whd_ret = whd_init(&data->whd_drv, &init_config_default, &resource_ops, buffer_if,
 				     netif_funcs);
 	if (whd_ret == CY_RSLT_SUCCESS) {
@@ -174,33 +198,42 @@ int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface
 /*
  * Implement SDIO CMD52/53 wrappers
  */
+
+static struct sdio_func * airoc_wifi_get_sdio_func(struct sd_card *sd, whd_bus_function_t function)
+{
+	struct airoc_wifi_data *data = CONTAINER_OF(sd, struct airoc_wifi_data, card);
+	struct sdio_func * func [] = {
+		&sd->func0,
+		&data->sdio_func1,
+		&data->sdio_func2
+	};
+	
+	if(function > WLAN_FUNCTION)
+	{
+		return NULL;
+	}
+
+	return func[function];
+}
+
 whd_result_t whd_bus_sdio_cmd52(whd_driver_t whd_driver, whd_bus_transfer_direction_t direction,
 				whd_bus_function_t function, uint32_t address, uint8_t value,
 				sdio_response_needed_t response_expected, uint8_t *response)
 {
 	int ret;
 	struct sd_card *sd = whd_driver->bus_priv->sdio_obj;
-	sdio_cmd_argument_t arg = {0};
-	struct sdhc_command cmd = {
-		.opcode = SDIO_RW_DIRECT,
-		.response_type = SD_RSP_TYPE_R5,
-		.timeout_ms = CONFIG_SD_CMD_TIMEOUT
-	};
+ 	struct sdio_func *func = airoc_wifi_get_sdio_func(sd, function);
 
-	arg.cmd52.function_number = (uint32_t)function;
-	arg.cmd52.register_address = (uint32_t)address;
-	arg.cmd52.rw_flag = (uint32_t)((direction == BUS_WRITE) ? 1 : 0);
-	arg.cmd52.write_data = value;
-	cmd.arg = arg.value;
 	WHD_BUS_STATS_INCREMENT_VARIABLE(whd_driver->bus_priv, cmd52);
 
-	ret = sdhc_request(sd->sdhc, &cmd, NULL);
+	if(direction == BUS_WRITE) {
+		ret = sdio_rw_byte(func, address, value, response);
+	} else {
+		ret = sdio_read_byte(func, address, response);
 
+	}
 	WHD_BUS_STATS_CONDITIONAL_INCREMENT_VARIABLE(whd_driver->bus_priv, (ret != WHD_SUCCESS),
 						     cmd52_fail);
-	if (response != NULL) {
-		*response = cmd.response[0U] & SDIO_DIRECT_CMD_DATA_MASK;
-	}
 
 	/* Possibly device might not respond to this cmd. So, don't check return value here */
 	if ((ret != WHD_SUCCESS) && (address == SDIO_SLEEP_CSR)) {
@@ -218,47 +251,16 @@ whd_result_t whd_bus_sdio_cmd53(whd_driver_t whd_driver, whd_bus_transfer_direct
 {
 	whd_result_t ret;
 	struct sd_card *sd = whd_driver->bus_priv->sdio_obj;
-	sdio_cmd_argument_t arg = {0};
+ 	struct sdio_func *func = airoc_wifi_get_sdio_func(sd, function);
 
 	if (direction == BUS_WRITE) {
 		WHD_BUS_STATS_INCREMENT_VARIABLE(whd_driver->bus_priv, cmd53_write);
-	}
-
-	if (direction == BUS_READ) {
-		WHD_BUS_STATS_INCREMENT_VARIABLE(whd_driver->bus_priv, cmd53_read);
-	}
-
-	arg.cmd53.function_number = (uint32_t)function;
-	arg.cmd53.register_address = (uint32_t)address;
-	arg.cmd53.op_code = (uint32_t)1;
-	arg.cmd53.rw_flag = (uint32_t)((direction == BUS_WRITE) ? 1 : 0);
-
-	if (mode == SDIO_BYTE_MODE) {
-		__ASSERT(data_size <= (uint16_t)512, "%s: data_size > 512 for byte mode", __func__);
-		arg.cmd53.count = (uint32_t)(data_size & 0x1FF);
-
+		ret = sdio_write_addr(func, address, data, data_size);
 	} else {
-		arg.cmd53.count = (uint32_t)(data_size / (uint16_t)SDIO_64B_BLOCK);
-		if ((uint32_t)(arg.cmd53.count * (uint16_t)SDIO_64B_BLOCK) < data_size) {
-			++arg.cmd53.count;
-		}
-		arg.cmd53.block_mode = 1;
+		WHD_BUS_STATS_INCREMENT_VARIABLE(whd_driver->bus_priv, cmd53_read);
+		ret = sdio_read_addr(func, address, data,data_size);
 	}
-
-	struct sdhc_command sdhc_cmd = {
-		.opcode = SDIO_RW_EXTENDED,
-		.response_type = SD_RSP_TYPE_R5,
-		.arg = arg.value,
-	};
-
-	struct sdhc_data sdhc_data = {
-		.timeout_ms = CONFIG_SD_DATA_TIMEOUT,
-		.data = data,
-		.block_size = (mode == SDIO_BYTE_MODE) ? data_size : SDIO_64B_BLOCK,
-		.blocks = (mode == SDIO_BYTE_MODE) ? 1 : arg.cmd53.count,
-	};
-	ret = sdhc_request(sd->sdhc, &sdhc_cmd, &sdhc_data);
-
+	
 	WHD_BUS_STATS_CONDITIONAL_INCREMENT_VARIABLE(
 		whd_driver->bus_priv, ((ret != WHD_SUCCESS) && (direction == BUS_READ)),
 		cmd53_read_fail);
