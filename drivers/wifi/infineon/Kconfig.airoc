@@ -7,8 +7,6 @@ menuconfig WIFI_AIROC
 	select THREAD_CUSTOM_DATA
 	select WIFI_OFFLOAD
 	select NET_L2_WIFI_MGMT
-	select SDIO_STACK
-	select SDHC
 	select WIFI_USE_NATIVE_NETWORKING
 	select USE_INFINEON_ABSTRACTION_RTOS
 	depends on DT_HAS_INFINEON_AIROC_WIFI_ENABLED
@@ -17,6 +15,20 @@ menuconfig WIFI_AIROC
 
 if WIFI_AIROC
 
+choice AIROC_WIFI_BUS
+	bool "Select BUS interface"
+	default AIROC_WIFI_BUS_SDIO
+
+config AIROC_WIFI_BUS_SDIO
+	bool "SDIO Bus interface"
+	select SDIO_STACK
+	select SDHC
+
+config AIROC_WIFI_BUS_SPI
+	bool "SPI Bus interface"
+	select SPI
+
+endchoice
 config AIROC_WIFI_EVENT_TASK_STACK_SIZE
 	int "Event Task Stack Size"
 	default 4096
