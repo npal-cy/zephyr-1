@@ -7,6 +7,12 @@
 
 #include <airoc_wifi.h>
 
+#include <bus_protocols/whd_bus.h>
+
+#define DT_DRV_COMPAT infineon_airoc_wifi
+
+LOG_MODULE_REGISTER(infineon_airoc, CONFIG_WIFI_LOG_LEVEL);
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -58,44 +64,16 @@ int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface
 			    whd_netif_funcs_t *netif_funcs, whd_buffer_funcs_t *buffer_if)
 {
 	int ret;
-	struct airoc_wifi_data *data = dev->data;
-	const struct airoc_wifi_config *config = dev->config;
 
 	if (airoc_wifi_power_on(dev)) {
-		LOG_ERR("airoc_wifi_power_on retuens fail");
+		LOG_ERR("airoc_wifi_power_on returns fail");
 		return -ENODEV;
 	}
 
-#if defined(CONFIG_AIROC_WIFI_BUS_SDIO)
-	ret = airoc_wifi_init_sdio();
-	if (ret) {
-		return ret;
-	}
-#endif
-#if defined(CONFIG_AIROC_WIFI_BUS_SPI)
-	ret = airoc_wifi_init_spi();
-	if (ret) {
-		return ret;
-	}
-#endif
+	/* Initialize the configured bus interface */
+	ret = airoc_wifi_init_bus(dev, interface, netif_funcs, buffer_if);
 
-	/* Init wifi host driver (whd) */
-	cy_rslt_t whd_ret = whd_init(&data->whd_drv, &init_config_default, &resource_ops, buffer_if,
-				     netif_funcs);
-	if (whd_ret == CY_RSLT_SUCCESS) {
-		whd_ret = whd_bus_sdio_attach(data->whd_drv, &whd_sdio_config,
-					      (whd_sdio_t)&data->card);
-
-		if (whd_ret == CY_RSLT_SUCCESS) {
-			whd_ret = whd_wifi_on(data->whd_drv, interface);
-		}
-
-		if (whd_ret != CY_RSLT_SUCCESS) {
-			whd_deinit(*interface);
-			return -ENODEV;
-		}
-	}
-	return 0;
+	return ret;
 }
 
 /*

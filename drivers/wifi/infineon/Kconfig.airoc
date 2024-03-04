@@ -29,6 +29,7 @@ config AIROC_WIFI_BUS_SPI
 	select SPI
 
 endchoice
+
 config AIROC_WIFI_EVENT_TASK_STACK_SIZE
 	int "Event Task Stack Size"
 	default 4096

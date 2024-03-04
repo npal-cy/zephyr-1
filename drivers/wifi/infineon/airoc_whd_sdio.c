@@ -14,49 +14,11 @@
 
 #define DT_DRV_COMPAT infineon_airoc_wifi
 
-LOG_MODULE_REGISTER(infineon_airoc, CONFIG_WIFI_LOG_LEVEL);
+LOG_MODULE_DECLARE(infineon_airoc, CONFIG_WIFI_LOG_LEVEL);
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/** Defines the amount of stack memory available for the wifi thread. */
-#if !defined(CY_WIFI_THREAD_STACK_SIZE)
-#define CY_WIFI_THREAD_STACK_SIZE (5120)
-#endif
-
-/** Defines the priority of the thread that services wifi packets. Legal values are defined by the
- *  RTOS being used.
- */
-#if !defined(CY_WIFI_THREAD_PRIORITY)
-#define CY_WIFI_THREAD_PRIORITY (CY_RTOS_PRIORITY_HIGH)
-#endif
-
-/** Defines the country this will operate in for wifi initialization parameters. See the
- *  wifi-host-driver's whd_country_code_t for legal options.
- */
-#if !defined(CY_WIFI_COUNTRY)
-#define CY_WIFI_COUNTRY (WHD_COUNTRY_AUSTRALIA)
-#endif
-
-/** Defines the priority of the interrupt that handles out-of-band notifications from the wifi
- *  chip. Legal values are defined by the MCU running this code.
- */
-#if !defined(CY_WIFI_OOB_INTR_PRIORITY)
-#define CY_WIFI_OOB_INTR_PRIORITY (2)
-#endif
-
-/** Defines whether to use the out-of-band pin to allow the WIFI chip to wake up the MCU. */
-#if defined(CY_WIFI_HOST_WAKE_SW_FORCE)
-#define CY_USE_OOB_INTR (CY_WIFI_HOST_WAKE_SW_FORCE)
-#else
-#define CY_USE_OOB_INTR (1u)
-#endif /* defined(CY_WIFI_HOST_WAKE_SW_FORCE) */
-
-#define CY_WIFI_HOST_WAKE_IRQ_EVENT GPIO_INT_TRIG_LOW
-#define DEFAULT_OOB_PIN             (0)
-#define WLAN_POWER_UP_DELAY_MS      (250)
-#define WLAN_CBUCK_DISCHARGE_MS     (10)
 
 extern whd_resource_source_t resource_ops;
 
@@ -77,7 +39,7 @@ static whd_init_config_t init_config_default = {
  *                 Function
  ******************************************************/
 
-int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface,
+int airoc_wifi_init_bus(const struct device *dev, whd_interface_t *interface,
 			    whd_netif_funcs_t *netif_funcs, whd_buffer_funcs_t *buffer_if)
 {
 	int ret;
@@ -98,11 +60,6 @@ int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface
 		.intr_priority = CY_WIFI_OOB_INTR_PRIORITY};
 	whd_sdio_config.oob_config = oob_config;
 #endif
-
-	if (airoc_wifi_power_on(dev)) {
-		LOG_ERR("airoc_wifi_power_on retuens fail");
-		return -ENODEV;
-	}
 
 	if (!device_is_ready(config->sdhc_dev)) {
 		LOG_ERR("SDHC device is not ready");
