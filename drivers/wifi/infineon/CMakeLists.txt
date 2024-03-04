@@ -6,7 +6,8 @@ zephyr_include_directories(./)
 
 zephyr_library_sources_ifdef(CONFIG_WIFI_AIROC airoc_wifi.c)
 zephyr_library_sources_ifdef(CONFIG_WIFI_AIROC airoc_whd_hal.c)
-zephyr_library_sources_ifdef(CONFIG_WIFI_AIROC airoc_whd_sdio.c)
+zephyr_library_sources_ifdef(CONFIG_AIROC_WIFI_BUS_SDIO airoc_whd_sdio.c)
+zephyr_library_sources_ifdef(CONFIG_AIROC_WIFI_BUS_SPI airoc_whd_spi.c)
 
 zephyr_compile_definitions(CYBSP_WIFI_CAPABLE)
 zephyr_compile_definitions(CY_RTOS_AWARE)

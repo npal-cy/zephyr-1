@@ -13,9 +13,11 @@
 #include <cy_utils.h>
 
 struct airoc_wifi_data {
+#if defined(CONFIG_AIROC_WIFI_BUS_SDIO)
 	struct sd_card card;
 	struct sdio_func sdio_func1;
 	struct sdio_func sdio_func2;
+#endif
 	struct net_if *iface;
 	bool second_interface_init;
 	bool is_ap_up;
