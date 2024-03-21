@@ -37,8 +37,12 @@ LOG_MODULE_REGISTER(bt_driver);
 #define H4_EVT  0x04
 #define H4_ISO  0x05
 
+extern void cy43xxx_assert_bt_wake(void);
+extern void cy43xxx_deassert_bt_wake(void);
+
 static K_KERNEL_STACK_DEFINE(rx_thread_stack, CONFIG_BT_DRV_RX_STACK_SIZE);
 static struct k_thread rx_thread_data;
+
 
 static struct {
 	struct net_buf *buf;
@@ -464,6 +468,8 @@ static inline void process_rx(void)
 	}
 }
 
+
+
 static void bt_uart_isr(const struct device *unused, void *user_data)
 {
 	ARG_UNUSED(unused);
@@ -478,11 +484,22 @@ static void bt_uart_isr(const struct device *unused, void *user_data)
 			process_rx();
 		}
 	}
+
+	if (uart_irq_is_pending(h4_dev))
+	{
+		/* !!!!!!!!!!!!!!!!!!!!!! */
+		cy43xxx_deassert_bt_wake();
+		/* !!!!!!!!!!!!!!!!!!!!!! */
+	}
 }
 
 static int h4_send(struct net_buf *buf)
 {
 	LOG_DBG("buf %p type %u len %u", buf, bt_buf_get_type(buf), buf->len);
+
+	/* !!!!!!!!!!!!!!!!!!!!!! */
+	cy43xxx_assert_bt_wake();
+	/* !!!!!!!!!!!!!!!!!!!!!! */
 
 	net_buf_put(&tx.fifo, buf);
 	uart_irq_tx_enable(h4_dev);

@@ -40,8 +40,23 @@ LOG_MODULE_REGISTER(cyw43xxx_driver);
 /* Length of UPDATE BAUD RATE command */
 #define HCI_VSC_UPDATE_BAUD_RATE_LENGTH   (6u)
 
+/* Length of WRITE SLEEP MODE command */
+#define HCI_VSC_WRITE_SLEEP_MODE_LENGTH   (12)
+
 /* Default BAUDRATE */
 #define HCI_UART_DEFAULT_BAUDRATE         (115200)
+
+/* BT_SLEEP_MODE specific constants */
+#define BT_SLEEP_MODE_UART                   (1)
+#define BT_SLEEP_THRESHOLD_HOST              (1)
+#define BT_SLEEP_THRESHOLD_HOST_CONTROLLER   (1)
+#define BT_SLEEP_ALLOW_HOST_SLEEP_DURING_SCO (1)
+#define BT_SLEEP_COMBINE_SLEEP_MODE_AND_LPM  (1)
+#define BT_SLEEP_ENABLE_UART_TXD_TRISTATE    (0)
+#define BT_SLEEP_PULSED_HOST_WAKE            (0)
+#define CYBT_WAKE_ACTIVE_LOW                 (0)
+#define CYBT_WAKE_ACTIVE_HIGH                (1)
+
 
 /* Externs for CY43xxx controller FW */
 extern const uint8_t brcm_patchram_buf[];
@@ -52,6 +67,7 @@ enum {
 	BT_HCI_VND_OP_WRITE_RAM                 = 0xFC4C,
 	BT_HCI_VND_OP_LAUNCH_RAM                = 0xFC4E,
 	BT_HCI_VND_OP_UPDATE_BAUDRATE           = 0xFC18,
+	BT_HCI_VND_OP_WRITE_SLEEP_MODE          = 0xFC27,
 };
 
 /*  bt_h4_vnd_setup function.
@@ -61,6 +77,9 @@ enum {
  * extansion module if CONFIG_BT_HCI_SETUP is enabled.
  */
 int bt_h4_vnd_setup(const struct device *dev);
+
+void cy43xxx_assert_bt_wake(void);
+void cy43xxx_deassert_bt_wake(void);
 
 static int bt_hci_uart_set_baudrate(const struct device *bt_uart_dev, uint32_t baudrate)
 {
@@ -141,6 +160,68 @@ static int bt_update_controller_baudrate(const struct device *bt_uart_dev, uint3
 	}
 
 	return 0;
+}
+
+static int bt_enable_sleep_mode(void)
+{
+#if DT_INST_NODE_HAS_PROP(0, bt_dev_wake_gpios)
+	struct gpio_dt_spec bt_dev_wake = GPIO_DT_SPEC_GET(DT_DRV_INST(0), bt_dev_wake_gpios);
+
+	struct net_buf *buf;
+	int err;
+	uint8_t sleep_vsc[HCI_VSC_WRITE_SLEEP_MODE_LENGTH];
+
+	sleep_vsc[0] = BT_SLEEP_MODE_UART;
+	sleep_vsc[1] = BT_SLEEP_THRESHOLD_HOST;
+	sleep_vsc[2] = BT_SLEEP_THRESHOLD_HOST_CONTROLLER;
+	sleep_vsc[3] = ((bt_dev_wake.dt_flags & GPIO_ACTIVE_LOW) != 0) ? CYBT_WAKE_ACTIVE_LOW : CYBT_WAKE_ACTIVE_HIGH;
+	sleep_vsc[4] = CYBT_WAKE_ACTIVE_HIGH;
+	sleep_vsc[5] = BT_SLEEP_ALLOW_HOST_SLEEP_DURING_SCO;
+	sleep_vsc[6] = BT_SLEEP_COMBINE_SLEEP_MODE_AND_LPM;
+	sleep_vsc[7] = BT_SLEEP_ENABLE_UART_TXD_TRISTATE;
+	sleep_vsc[8] = 0;
+	sleep_vsc[9] = 0;
+	sleep_vsc[10] = 0;
+	sleep_vsc[11] = BT_SLEEP_PULSED_HOST_WAKE;
+
+	/* Allocate buffer for update uart baudrate command.
+	 */
+	buf = bt_hci_cmd_create(BT_HCI_VND_OP_WRITE_SLEEP_MODE,
+				HCI_VSC_WRITE_SLEEP_MODE_LENGTH);
+	if (buf == NULL) {
+		LOG_ERR("Unable to allocate command buffer");
+		return -ENOMEM;
+	}
+
+	/* Add data part of packet */
+	net_buf_add_mem(buf, &sleep_vsc, HCI_VSC_WRITE_SLEEP_MODE_LENGTH);
+
+	/* Send update uart baudrate command. */
+	err = bt_hci_cmd_send_sync(BT_HCI_VND_OP_WRITE_SLEEP_MODE, buf, NULL);
+	if (err) {
+		return err;
+	}
+
+	cy43xxx_assert_bt_wake();
+
+#endif /* DT_INST_NODE_HAS_PROP(0, bt_dev_wake_gpios) */
+	return 0;
+}
+
+void cy43xxx_assert_bt_wake(void)
+{
+#if DT_INST_NODE_HAS_PROP(0, bt_dev_wake_gpios)
+	struct gpio_dt_spec bt_dev_wake = GPIO_DT_SPEC_GET(DT_DRV_INST(0), bt_dev_wake_gpios);
+	gpio_pin_set_dt(&bt_dev_wake, 1);
+#endif /* DT_INST_NODE_HAS_PROP(0, bt_dev_wake_gpios) */
+}
+
+void cy43xxx_deassert_bt_wake(void)
+{
+#if DT_INST_NODE_HAS_PROP(0, bt_dev_wake_gpios)
+	struct gpio_dt_spec bt_dev_wake = GPIO_DT_SPEC_GET(DT_DRV_INST(0), bt_dev_wake_gpios);
+	gpio_pin_set_dt(&bt_dev_wake, 0);
+#endif /* DT_INST_NODE_HAS_PROP(0, bt_dev_wake_gpios) */
 }
 
 static int bt_firmware_download(const uint8_t *firmware_image, uint32_t size)
@@ -240,6 +321,25 @@ int bt_h4_vnd_setup(const struct device *dev)
 	}
 #endif /* DT_INST_NODE_HAS_PROP(0, bt_reg_on_gpios) */
 
+
+#if DT_INST_NODE_HAS_PROP(0, bt_dev_wake_gpios)
+	struct gpio_dt_spec bt_dev_wake = GPIO_DT_SPEC_GET(DT_DRV_INST(0), bt_dev_wake_gpios);
+
+	if (!gpio_is_ready_dt(&bt_dev_wake)) {
+		LOG_ERR("Error: failed to configure bt_dev_wake %s pin %d",
+			bt_dev_wake.port->name, bt_dev_wake.pin);
+		return -EIO;
+	}
+
+	/* Configure bt_dev_wake as output  */
+	err = gpio_pin_configure_dt(&bt_dev_wake, GPIO_OUTPUT);
+	if (err) {
+		LOG_ERR("Error %d: failed to configure bt_dev_wake %s pin %d",
+			err, bt_dev_wake.port->name, bt_dev_wake.pin);
+		return err;
+	}
+#endif /* DT_INST_NODE_HAS_PROP(0, bt_dev_wake_gpios) */
+
 	/* BT settling time after power on */
 	(void)k_msleep(BT_POWER_ON_SETTLING_TIME_MS);
 
@@ -279,6 +379,14 @@ int bt_h4_vnd_setup(const struct device *dev)
 	if (err) {
 		return err;
 	}
+
+#if DT_INST_NODE_HAS_PROP(0, bt_dev_wake_gpios)
+	/* Enable sleep mode */
+	err = bt_enable_sleep_mode();
+	if (err) {
+		return err;
+	}
+#endif /* DT_INST_NODE_HAS_PROP(0, bt_dev_wake_gpios) */
 
 	/* Set host controller functionality to user defined baudrate
 	 * after fw downloading.
