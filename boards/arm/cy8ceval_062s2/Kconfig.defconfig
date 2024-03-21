@@ -1,0 +1,56 @@
+# CY8CEVAL-062S2 PSoC™ 62S2 Evaluation Kit
+
+# Copyright (c) 2021 Cypress Semiconductor Corporation.
+# SPDX-License-Identifier: Apache-2.0
+
+if BOARD_CY8CKIT_062S2
+
+config BOARD
+	default "cy8ckit_062s2"
+
+if WIFI || BT
+
+# Select AIROC part and module
+choice AIROC_PART
+	default CYW43012
+endchoice
+
+choice CYW43012_MODULE
+	default CYW43012_MURATA_1LV
+endchoice
+
+endif # WIFI || BT
+
+if WIFI
+
+config WIFI_AIROC
+	default y
+
+# Enable L2 Ethernet
+config NET_L2_ETHERNET
+	default y
+
+endif # WIFI
+
+if BT
+
+# Select HCI components
+config UART
+	bool
+	default y
+
+config BT_UART
+	default y
+
+choice BT_HCI_BUS_TYPE
+	default BT_H4
+endchoice
+
+endif # BT
+
+# Heap Pool Size
+config HEAP_MEM_POOL_SIZE
+	default 15000 if WIFI
+	default 4096
+
+endif   # BOARD_CY8CKIT_062S2
