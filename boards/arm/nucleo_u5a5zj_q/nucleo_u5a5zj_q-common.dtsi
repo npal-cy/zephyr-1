@@ -91,10 +91,25 @@
 };
 
 &usart2 {
-	pinctrl-0 = <&usart2_tx_pd5 &usart2_rx_pd6>;
+	pinctrl-0 = <&usart2_tx_pd5 &usart2_rx_pd6 &usart2_rts_pd4 &usart2_cts_pd3>;
 	pinctrl-names = "default";
 	current-speed = <115200>;
+    hw-flow-control;
 	status = "okay";
+
+    bt-hci {
+		status = "okay";
+		compatible = "infineon,cyw43xxx-bt-hci";
+		bt-reg-on-gpios   = <&gpiof 5 (GPIO_ACTIVE_HIGH)>;
+        bt-dev-wake-gpios = <&gpiog 1 (GPIO_ACTIVE_HIGH)>;
+
+		/* Configuration UART speeds for firmware download (fw-download-speed) and
+		 * HCI operation (hci-operation-speed).
+		 * If hci-operation-speed or fw-download-speed are not defined in bt-hci{...}
+		 * node, cyw43xx driver will use bus/current-speed as default speed.
+		 */
+		fw-download-speed = <2000000>;
+	};
 };
 
 &i2c1 {

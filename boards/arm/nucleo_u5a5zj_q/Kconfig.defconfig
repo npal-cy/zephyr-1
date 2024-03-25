@@ -8,4 +8,12 @@ if BOARD_NUCLEO_U5A5ZJ_Q
 config BOARD
 	default "nucleo_u5a5zj_q"
 
+if BT
+
+choice AIROC_PART
+	default BT_AIROC_CUSTOM
+endchoice
+
+endif # BT
+
 endif # BOARD_NUCLEO_U5A5ZJ_Q

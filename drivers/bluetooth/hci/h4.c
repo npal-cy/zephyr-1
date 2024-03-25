@@ -485,7 +485,7 @@ static void bt_uart_isr(const struct device *unused, void *user_data)
 		}
 	}
 
-	if (uart_irq_is_pending(h4_dev))
+	if (!uart_irq_is_pending(h4_dev) && !tx.buf)
 	{
 		/* !!!!!!!!!!!!!!!!!!!!!! */
 		cy43xxx_deassert_bt_wake();

@@ -30,9 +30,9 @@ LOG_MODULE_REGISTER(cyw43xxx_driver);
 
 /* BT settling time after power on */
 #define BT_POWER_ON_SETTLING_TIME_MS      (500u)
-
+ 
 /* Stabilization delay after FW loading */
-#define BT_STABILIZATION_DELAY_MS         (250u)
+#define BT_STABILIZATION_DELAY_MS         (300u)
 
 /* HCI Command packet from Host to Controller */
 #define HCI_COMMAND_PACKET                (0x01)
