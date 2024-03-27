@@ -11,17 +11,15 @@ config BOARD
 if WIFI || BT
 
 # Select AIROC part and module
-#choice AIROC_PART
-#	default CYW43012
-#endchoice
-#
-#choice CYW43012_MODULE
-#	default CYW43012_MURATA_1LV
-#endchoice
-
-# Select AIROC part and module
 choice AIROC_PART
-	default BT_AIROC_CUSTOM
+	default CYW43439
+endchoice
+
+choice CYW43439_MODULE
+	default CYW43439_MURATA_1YN
+endchoice
+
+
 endchoice
 
 endif # WIFI || BT
