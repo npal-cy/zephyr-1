@@ -61,15 +61,16 @@
 
 &clk_msis {
 	status = "okay";
-	msi-range = <4>;
+	msi-range = <0>;
 	msi-pll-mode;
 };
 
 &pll1 {
-	div-m = <1>;
-	mul-n = <80>;
-	div-q = <2>;
-	div-r = <2>;
+    div-m = <3>;
+    mul-n = <20>;
+    div-q = <2>;
+    div-r = <2>;
+    div-p = <10>;
 	clocks = <&clk_msis>;
 	status = "okay";
 };
@@ -108,9 +109,19 @@
 		 * If hci-operation-speed or fw-download-speed are not defined in bt-hci{...}
 		 * node, cyw43xx driver will use bus/current-speed as default speed.
 		 */
-		fw-download-speed = <2000000>;
+		fw-download-speed = <1000000>; /* fw speed > 1M does not work with PM.... Need investigate */
 	};
 };
+
+stm32_lp_tick_source: &lptim1 {
+    clocks = <&rcc STM32_CLOCK_BUS_APB3 0x00000800>,
+             <&rcc STM32_SRC_LSE LPTIM1_SEL(3)>;
+    status = "okay";
+};
+
+&clk_lse {
+    status = "okay";
+}; 
 
 &i2c1 {
 	pinctrl-0 = <&i2c1_scl_pb8 &i2c1_sda_pb9>;

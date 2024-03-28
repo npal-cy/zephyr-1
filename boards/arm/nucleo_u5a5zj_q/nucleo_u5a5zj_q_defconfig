@@ -25,4 +25,17 @@ CONFIG_HW_STACK_PROTECTION=y
 # enable pin controller
 CONFIG_PINCTRL=y
 
+CONFIG_PM=y
+CONFIG_PM_DEVICE=y
+#CONFIG_PM_DEVICE_RUNTIME=y
+
+# When CONFIG_PM_NEED_ALL_DEVICES_IDLE option is enabled, 
+# check that no devices are busy before entering into system
+# low power mode
+CONFIG_PM_NEED_ALL_DEVICES_IDLE=y
+
+# For Debuging in sleep mode
+CONFIG_STM32_ENABLE_DEBUG_SLEEP_STOP=y
+CONFIG_DEBUG=y   
+
 CONFIG_AIROC_CUSTOM_FIRMWARE_HCD_BLOB="C:/temp/bt_fw/CYW4343A2_001.003.016.0031.0000_Generic_UART_37_4MHz_wlbga_BU_dl_signed.hcd"
