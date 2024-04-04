@@ -61,12 +61,12 @@ int airoc_wifi_init_bus(const struct device *dev, whd_interface_t *interface,
 	whd_sdio_config.oob_config = oob_config;
 #endif
 
-	if (!device_is_ready(config->sdhc_dev)) {
+	if (!device_is_ready(config->bus_dev)) {
 		LOG_ERR("SDHC device is not ready");
 		return -ENODEV;
 	}
 
-	ret = sd_init(config->sdhc_dev, &data->card);
+	ret = sd_init(config->bus_dev, &data->card);
 	if (ret) {
 		return ret;
 	}

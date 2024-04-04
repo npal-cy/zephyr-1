@@ -8,6 +8,7 @@
 #include <airoc_wifi.h>
 
 #include <bus_protocols/whd_bus.h>
+#include <cyhal_system.h>
 
 #define DT_DRV_COMPAT infineon_airoc_wifi
 

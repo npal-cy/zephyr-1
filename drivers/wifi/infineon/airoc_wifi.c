@@ -77,7 +77,7 @@ static void airoc_event_task(void);
 static struct airoc_wifi_data airoc_wifi_data = {0};
 
 static struct airoc_wifi_config airoc_wifi_config = {
-	.sdhc_dev = DEVICE_DT_GET(DT_INST_PARENT(0)),
+	.bus_dev = DEVICE_DT_GET(DT_INST_PARENT(0)),
 	.wifi_reg_on_gpio = GPIO_DT_SPEC_GET_OR(DT_DRV_INST(0), wifi_reg_on_gpios, {0}),
 	.wifi_host_wake_gpio = GPIO_DT_SPEC_GET_OR(DT_DRV_INST(0), wifi_host_wake_gpios, {0}),
 	.wifi_dev_wake_gpio = GPIO_DT_SPEC_GET_OR(DT_DRV_INST(0), wifi_dev_wake_gpios, {0}),

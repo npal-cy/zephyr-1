@@ -23,9 +23,8 @@ extern "C" {
 extern whd_resource_source_t resource_ops;
 
 struct whd_bus_priv {
-	whd_spi_config_t spi_config;
-	whd_bus_stats_t whd_bus_stats;
-	whd_spi_t spi_obj;
+    whd_spi_config_t spi_config;
+    whd_spi_t spi_obj;
 };
 
 static whd_init_config_t init_config_default = {
@@ -39,55 +38,14 @@ static whd_init_config_t init_config_default = {
  *                 Function
  ******************************************************/
 
-int airoc_wifi_power_on(const struct device *dev)
-{
-#if DT_INST_NODE_HAS_PROP(0, wifi_reg_on_gpios)
-	int ret;
-	const struct airoc_wifi_config *config = dev->config;
-
-	/* Check WIFI REG_ON gpio instance */
-	if (!device_is_ready(config->wifi_reg_on_gpio.port)) {
-		LOG_ERR("Error: failed to configure wifi_reg_on %s pin %d",
-			config->wifi_reg_on_gpio.port->name, config->wifi_reg_on_gpio.pin);
-		return -EIO;
-	}
-
-	/* Configure wifi_reg_on as output  */
-	ret = gpio_pin_configure_dt(&config->wifi_reg_on_gpio, GPIO_OUTPUT);
-	if (ret) {
-		LOG_ERR("Error %d: failed to configure wifi_reg_on %s pin %d", ret,
-			config->wifi_reg_on_gpio.port->name, config->wifi_reg_on_gpio.pin);
-		return ret;
-	}
-	ret = gpio_pin_set_dt(&config->wifi_reg_on_gpio, 0);
-	if (ret) {
-		return ret;
-	}
-
-	/* Allow CBUCK regulator to discharge */
-	(void)cyhal_system_delay_ms(WLAN_CBUCK_DISCHARGE_MS);
-
-	/* WIFI power on */
-	ret = gpio_pin_set_dt(&config->wifi_reg_on_gpio, 1);
-	if (ret) {
-		return ret;
-	}
-	(void)cyhal_system_delay_ms(WLAN_POWER_UP_DELAY_MS);
-#endif /* DT_INST_NODE_HAS_PROP(0, reg_on_gpios) */
-
-	return 0;
-}
-
-int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface,
+int airoc_wifi_init_bus(const struct device *dev, whd_interface_t *interface,
 			    whd_netif_funcs_t *netif_funcs, whd_buffer_funcs_t *buffer_if)
 {
-	int ret;
 	struct airoc_wifi_data *data = dev->data;
 	const struct airoc_wifi_config *config = dev->config;
 
 	whd_spi_config_t whd_spi_config = {
-		.spi_1bit_mode = WHD_FALSE,
-		.high_speed_spi_clock = WHD_FALSE,
+		.is_spi_normal_mode = WHD_FALSE,
 	};
 
 #if DT_INST_NODE_HAS_PROP(0, wifi_host_wake_gpios)
@@ -96,17 +54,13 @@ int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface
 		.dev_gpio_sel = DEFAULT_OOB_PIN,
 		.is_falling_edge =
 			(CY_WIFI_HOST_WAKE_IRQ_EVENT == GPIO_INT_TRIG_LOW) ? WHD_TRUE : WHD_FALSE,
-		.intr_priority = CY_WIFI_OOB_INTR_PRIORITY};
+		.intr_priority = CY_WIFI_OOB_INTR_PRIORITY
+	};
 	whd_spi_config.oob_config = oob_config;
 #endif
 
-	if (airoc_wifi_power_on(dev)) {
-		LOG_ERR("airoc_wifi_power_on retuens fail");
-		return -ENODEV;
-	}
-
-	if (!device_is_ready(config->sdhc_dev)) {
-		LOG_ERR("SDHC device is not ready");
+	if (!device_is_ready(config->bus_dev)) {
+		LOG_ERR("SPI device is not ready");
 		return -ENODEV;
 	}
 
@@ -130,40 +84,62 @@ int airoc_wifi_init_primary(const struct device *dev, whd_interface_t *interface
 }
 
 /*
- * Implement SDIO Card interrupt
+ * Implement SPI Transfer wrapper
  */
 
-void whd_bus_spi_irq_handler(const struct device *dev, int reason, const void *user_data)
+whd_result_t whd_bus_spi_transfer(whd_driver_t whd_driver, const uint8_t *tx, size_t tx_length,
+			uint8_t *rx, size_t rx_length, uint8_t write_fill)
 {
-	if (reason == SDHC_INT_SDIO) {
-		whd_driver_t whd_driver = (whd_driver_t)user_data;
+	const struct spi_dt_spec *spi_obj = whd_driver->bus_priv->spi_obj; 
+	int ret;
+	const struct spi_buf tx_buf = {
+		.buf = (uint8_t *)tx,
+		.len = tx_length
+	};
+	const struct spi_buf_set tx_set = {
+		.buffers = &tx_buf,
+		.count = 1
+	};
+	const struct spi_buf rx_buf = {
+		.buf = rx,
+		.len = rx_length
+	};
+	const struct spi_buf_set rx_set = {
+		.buffers = &rx_buf,
+		.count = 1
+	};
 
-		WHD_BUS_STATS_INCREMENT_VARIABLE(whd_driver->bus_priv, spi_intrs);
-
-		/* call thread notify to wake up WHD thread */
-		whd_thread_notify_irq(whd_driver);
+	ret = spi_transceive_dt(spi_obj, &tx_set, &rx_set);
+	if (ret) {
+		LOG_DBG("spi_transceive FAIL %d\n", ret);
+			return ret;
 	}
+
+	return 0;
 }
+
+/*
+ * Is SPI interrupt required?
+ */
 
 whd_result_t whd_bus_spi_irq_register(whd_driver_t whd_driver)
 {
+	// DEBUG
+	printf("whd_bus_spi_irq_register() called\n");
+	// DEBUG END
+
 	/* Nothing to do here, all handles by whd_bus_spi_irq_enable function */
 	return WHD_SUCCESS;
 }
 
 whd_result_t whd_bus_spi_irq_enable(whd_driver_t whd_driver, whd_bool_t enable)
 {
-	int ret;
-	struct sd_card *sd = whd_driver->bus_priv->spi_obj;
+	// DEBUG
+	printf("whd_bus_spi_irq_enable() called - enable=%d\n", enable);
+	// DEBUG END
 
-	/* Enable/disable SDIO Card interrupts */
-	if (enable) {
-		ret = sdhc_enable_interrupt(sd->sdhc, whd_bus_spi_irq_handler, SDHC_INT_SDIO,
-					    whd_driver);
-	} else {
-		ret = sdhc_disable_interrupt(sd->sdhc, SDHC_INT_SDIO);
-	}
-	return ret;
+	/* Nothing to do here, all handles by whd_bus_spi_irq_enable function */
+	return WHD_SUCCESS;
 }
 
 /*
@@ -195,87 +171,6 @@ void whd_bus_spi_oob_irq_handler(const struct device *port, struct gpio_callback
 	whd_thread_notify_irq(data->whd_drv);
 
 #endif /* DT_INST_NODE_HAS_PROP(0, wifi-host-wake-gpios) */
-}
-
-whd_result_t whd_bus_spi_register_oob_intr(whd_driver_t whd_driver)
-{
-#if DT_INST_NODE_HAS_PROP(0, wifi_host_wake_gpios)
-	int ret;
-	const struct device *dev = DEVICE_DT_GET(DT_DRV_INST(0));
-	struct airoc_wifi_data *data = dev->data;
-
-	/* Get OOB pin info */
-	const whd_oob_config_t *oob_config = &whd_driver->bus_priv->spi_config.oob_config;
-	const struct gpio_dt_spec *host_oob_pin = oob_config->host_oob_pin;
-
-	/* Check if OOB pin is ready */
-	if (!gpio_is_ready_dt(host_oob_pin)) {
-		WPRINT_WHD_ERROR(("%s: Failed at gpio_is_ready_dt for host_oob_pin\n", __func__));
-		return WHD_HAL_ERROR;
-	}
-
-	/* Configure OOB pin as output */
-	ret = gpio_pin_configure_dt(host_oob_pin, GPIO_INPUT);
-	if (ret != 0) {
-		WPRINT_WHD_ERROR((
-			" %s: Failed at gpio_pin_configure_dt for host_oob_pin, result code = %d\n",
-			__func__, ret));
-		return WHD_HAL_ERROR;
-	}
-
-	/* Initialize/add OOB pin callback */
-	gpio_init_callback(&data->host_oob_pin_cb, whd_bus_spi_oob_irq_handler,
-			   BIT(host_oob_pin->pin));
-
-	ret = gpio_add_callback_dt(host_oob_pin, &data->host_oob_pin_cb);
-	if (ret != 0) {
-		WPRINT_WHD_ERROR(
-			("%s: Failed at gpio_add_callback_dt for host_oob_pin, result code = %d\n",
-			 __func__, ret));
-		return WHD_HAL_ERROR;
-	}
-#endif /* DT_INST_NODE_HAS_PROP(0, wifi_host_wake_gpios) */
-
-	return WHD_SUCCESS;
-}
-
-whd_result_t whd_bus_spi_unregister_oob_intr(whd_driver_t whd_driver)
-{
-#if DT_INST_NODE_HAS_PROP(0, wifi_host_wake_gpios)
-	int ret;
-	const whd_oob_config_t *oob_config = &whd_driver->bus_priv->spi_config.oob_config;
-
-	/* Disable OOB pin interrupts */
-	ret = gpio_pin_interrupt_configure_dt(oob_config->host_oob_pin, GPIO_INT_DISABLE);
-	if (ret != 0) {
-		WPRINT_WHD_ERROR(("%s: Failed at gpio_pin_interrupt_configure_dt for host_oob_pin, "
-				  "result code = %d\n",
-				  __func__, ret));
-		return WHD_HAL_ERROR;
-	}
-#endif /* DT_INST_NODE_HAS_PROP(0, wifi_host_wake_gpios) */
-	return WHD_SUCCESS;
-}
-
-whd_result_t whd_bus_spi_enable_oob_intr(whd_driver_t whd_driver, whd_bool_t enable)
-{
-#if DT_INST_NODE_HAS_PROP(0, wifi_host_wake_gpios)
-	int ret;
-	const whd_oob_config_t *oob_config = &whd_driver->bus_priv->spi_config.oob_config;
-	uint32_t trig_conf =
-		(oob_config->is_falling_edge == WHD_TRUE) ? GPIO_INT_TRIG_LOW : GPIO_INT_TRIG_HIGH;
-
-	/* Enable OOB pin interrupts */
-	ret = gpio_pin_interrupt_configure_dt(oob_config->host_oob_pin,
-					      GPIO_INT_ENABLE | GPIO_INT_EDGE | trig_conf);
-	if (ret != 0) {
-		WPRINT_WHD_ERROR(("%s: Failed at gpio_pin_interrupt_configure_dt for host_oob_pin, "
-				  "result code = %d\n",
-				  __func__, ret));
-		return WHD_HAL_ERROR;
-	}
-#endif /* DT_INST_NODE_HAS_PROP(0, wifi_host_wake_gpios) */
-	return WHD_SUCCESS;
 }
 
 #ifdef __cplusplus
