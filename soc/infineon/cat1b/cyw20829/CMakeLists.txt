@@ -40,9 +40,7 @@ if(CONFIG_INFINEON_SECURE_LCS OR CONFIG_BOOTLOADER_MCUBOOT)
   else()
     message("-- Found cysecuretools: ${CYSECURETOOLS}")
   endif()
-endif()
 
-if(CONFIG_INFINEON_SECURE_LCS)
   set(default_policy)
   set(default_policy_name)
 
@@ -64,14 +62,14 @@ if(CONFIG_INFINEON_SECURE_LCS)
         ${default_policy_name}
     PATHS
         ${APPLICATION_SOURCE_DIR}
-        ${ZEPHYR_BASE}
+        ${WEST_TOPDIR}
     NO_DEFAULT_PATH
     )
 
   if(NOT default_policy)
       message(FATAL_ERROR "Can't find policy:${CONFIG_INFINEON_SECURE_POLICY}"
               "/${default_policy_name}"
-              "Checked locations: ${APPLICATION_SOURCE_DIR}, ${ZEPHYR_BASE}")
+              "Checked locations: ${APPLICATION_SOURCE_DIR}, ${WEST_TOPDIR}")
   endif()
 
   set(cysecuretools_policy ${default_policy} CACHE PATH "cysecuretools policy")
@@ -111,7 +109,7 @@ set_property(GLOBAL APPEND PROPERTY extra_post_build_commands COMMAND
     --bootstrap-dst-addr ${bootstrap_dst_addr}
   )
 
-set(MERGED_FILE ${CMAKE_BINARY_DIR}/zephyr/zephyr_merged.hex)
+set(MERGED_FILE ${CMAKE_BINARY_DIR}/zephyr/zephyr_merged.hex  CACHE PATH "merged hex")
 
 # Merge platform specific header and zephyr image to a single binary.
 set_property(GLOBAL APPEND PROPERTY extra_post_build_commands
@@ -121,3 +119,9 @@ set_property(GLOBAL APPEND PROPERTY extra_post_build_commands
   )
 
 set_property(GLOBAL APPEND PROPERTY extra_post_build_byproducts ${MERGED_FILE})
+
+# Use custom mcuboot cmake for sign/encrypt by using cysecuretools
+if(CONFIG_BOOTLOADER_MCUBOOT)
+  set_target_properties(zephyr_property_target PROPERTIES SIGNING_SCRIPT
+    ${CMAKE_CURRENT_LIST_DIR}/mcuboot.cmake)
+endif()
