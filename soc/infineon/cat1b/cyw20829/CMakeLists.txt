@@ -32,7 +32,7 @@ math(EXPR flash_addr_offset
 set(gen_app_header_args --flash_addr_offset ${flash_addr_offset})
 set(app_signed_enc_path ${ZEPHYR_BINARY_DIR}/${KERNEL_NAME})
 
-if(CONFIG_INFINEON_SECURE_LCS OR CONFIG_BOOTLOADER_MCUBOOT)
+if(CONFIG_INFINEON_SECURE_LCS OR (NOT "${CONFIG_MCUBOOT_GENERATE_UNSIGNED_IMAGE}") OR (NOT "${CONFIG_MCUBOOT_SIGNATURE_KEY_FILE}" STREQUAL ""))
   # Check cysecuretools
   find_program(CYSECURETOOLS cysecuretools)
   if(NOT CYSECURETOOLS)
@@ -68,7 +68,7 @@ if(CONFIG_INFINEON_SECURE_LCS OR CONFIG_BOOTLOADER_MCUBOOT)
 
   if(NOT default_policy)
       message(FATAL_ERROR "Can't find policy:${CONFIG_INFINEON_SECURE_POLICY}"
-              "/${default_policy_name}"
+              "/${default_policy_name}\n"
               "Checked locations: ${APPLICATION_SOURCE_DIR}, ${WEST_TOPDIR}")
   endif()
 

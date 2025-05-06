@@ -217,4 +217,6 @@ function(zephyr_mcuboot_tasks)
   set_property(GLOBAL APPEND PROPERTY extra_post_build_byproducts ${byproducts})
 endfunction()
 
-zephyr_mcuboot_tasks()
+if((NOT "${CONFIG_MCUBOOT_GENERATE_UNSIGNED_IMAGE}") OR (NOT "${CONFIG_MCUBOOT_SIGNATURE_KEY_FILE}" STREQUAL ""))
+  zephyr_mcuboot_tasks()
+endif()
